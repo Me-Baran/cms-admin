@@ -1,0 +1,158 @@
+/**
+ * GitHub API wrapper for file operations.
+ *
+ * Uses the user's GitHub token (from Supabase OAuth provider_token)
+ * to read/write files in the site repo.
+ *
+ * All operations go through the GitHub REST API v3.
+ */
+
+const GITHUB_API = 'https://api.github.com';
+
+/**
+ * Create headers for GitHub API requests.
+ */
+function headers(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json',
+  };
+}
+
+/**
+ * Get the site repo from env or config.
+ * Format: "owner/repo" (e.g. "brightsmiledental/astro-website")
+ */
+export function getSiteRepo() {
+  return import.meta.env.PUBLIC_SITE_REPO || '';
+}
+
+/**
+ * Read a file from the repo.
+ * Returns { content, sha } or null if not found.
+ */
+export async function readFile(token, path, ref = 'main') {
+  const repo = getSiteRepo();
+  const url = `${GITHUB_API}/repos/${repo}/contents/${path}?ref=${ref}`;
+
+  const resp = await fetch(url, { headers: headers(token) });
+  if (resp.status === 404) return null;
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`GitHub read failed: ${resp.status} ${err.message || ''}`);
+  }
+
+  const data = await resp.json();
+  const content = atob(data.content);
+  return { content, sha: data.sha };
+}
+
+/**
+ * List files in a directory.
+ * Returns array of { name, path, sha, type }.
+ */
+export async function listFiles(token, dirPath, ref = 'main') {
+  const repo = getSiteRepo();
+  const url = `${GITHUB_API}/repos/${repo}/contents/${dirPath}?ref=${ref}`;
+
+  const resp = await fetch(url, { headers: headers(token) });
+  if (resp.status === 404) return [];
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`GitHub list failed: ${resp.status} ${err.message || ''}`);
+  }
+
+  const data = await resp.json();
+  return (data || []).map(item => ({
+    name: item.name,
+    path: item.path,
+    sha: item.sha,
+    type: item.type,
+    size: item.size,
+  }));
+}
+
+/**
+ * Create or update a file.
+ * For updates, pass the current sha.
+ */
+export async function writeFile(token, path, content, message, sha = null) {
+  const repo = getSiteRepo();
+  const url = `${GITHUB_API}/repos/${repo}/contents/${path}`;
+
+  const body = {
+    message,
+    content: btoa(content),
+    branch: 'main',
+  };
+  if (sha) body.sha = sha;
+
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`GitHub write failed: ${resp.status} ${err.message || ''}`);
+  }
+
+  return await resp.json();
+}
+
+/**
+ * Delete a file.
+ */
+export async function deleteFile(token, path, message, sha) {
+  const repo = getSiteRepo();
+  const url = `${GITHUB_API}/repos/${repo}/contents/${path}`;
+
+  const resp = await fetch(url, {
+    method: 'DELETE',
+    headers: headers(token),
+    body: JSON.stringify({ message, sha, branch: 'main' }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`GitHub delete failed: ${resp.status} ${err.message || ''}`);
+  }
+
+  return await resp.json();
+}
+
+/**
+ * Upload an image to the repo.
+ * Stores in public/images/uploads/ with a unique filename.
+ */
+export async function uploadImage(token, file, collectionName) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const safeName = file.name
+    .replace(/\.[^.]+$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 50);
+  const uniqueId = Date.now().toString(36);
+  const filename = `${safeName}-${uniqueId}.${ext}`;
+  const path = `public/images/uploads/${filename}`;
+
+  // Read file as base64
+  const buffer = await file.arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+  const result = await writeFile(
+    token,
+    path,
+    atob(base64),
+    `Upload image: ${filename}`
+  );
+
+  return {
+    url: `/images/uploads/${filename}`,
+    path,
+    sha: result.content.sha,
+  };
+}

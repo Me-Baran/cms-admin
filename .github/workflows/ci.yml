@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check file structure
+        run: |
+          test -f src/integration.js
+          test -f src/frontend/lib/schema.js
+          test -f src/frontend/lib/supabase.js
+          test -f src/frontend/lib/github.js
+          test -f src/frontend/lib/content.js
+          test -f src/frontend/pages/admin.astro
+          test -f src/frontend/styles/admin.css
+
+  build-check:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify package structure
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            if (!pkg.exports?.['.']) throw new Error('Missing exports');
+            if (!pkg.peerDependencies?.astro) throw new Error('Missing astro peer dep');
+            console.log('Package structure OK');
+          "

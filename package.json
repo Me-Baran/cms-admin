@@ -1,0 +1,42 @@
+{
+  "name": "cms-admin",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Generic Astro integration for content management — works with any Astro project",
+  "main": "src/integration.js",
+  "exports": {
+    ".": "./src/integration.js",
+    "./admin.astro": "./src/frontend/pages/admin.astro"
+  },
+  "scripts": {
+    "dev": "echo 'Install in an Astro project to use'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/"
+  },
+  "peerDependencies": {
+    "astro": ">=5.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "astro",
+    "astro-integration",
+    "cms",
+    "admin",
+    "content-management",
+    "github",
+    "supabase"
+  ]
+}

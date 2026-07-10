@@ -1,93 +1,135 @@
 # cms-admin Progress
 
-## Status: Planning
+## Status: Phase 1-2 Complete, Generic Package
 
 ## Milestones
 
 | Milestone | Status | Target |
 |-----------|--------|--------|
-| M1: Project Scaffolding | ⬜ Not Started | — |
-| M2: Authentication | ⬜ Not Started | — |
-| M3: Frontend Edit UI | ⬜ Not Started | — |
-| M4: GitHub API Integration | ⬜ Not Started | — |
-| M5: Layout Processing | ⬜ Not Started | — |
-| M6: GitHub Actions Workflow | ⬜ Not Started | — |
-| M7: Responsive Layout | ⬜ Not Started | — |
-| M8: Polish & Security | ⬜ Not Started | — |
+| M1: Project Scaffolding | ✅ Complete | Phase 1 |
+| M2: Authentication | ✅ Complete | Phase 1 |
+| M3: Content Editor UI | ✅ Complete | Phase 1 |
+| M4: GitHub API Integration | ✅ Complete | Phase 1 |
+| M5: Site Settings Editor | ✅ Complete | Phase 2 |
+| M6: Supabase Storage Upload | ✅ Complete | Phase 2 |
+| M7: Tests & CI | ✅ Complete | Phase 1-2 |
+| M8: Generic Package (any Astro project) | ✅ Complete | Refactor |
+| M9: Visual Layout Editing | ⬜ Not Started | Phase 3 |
+| M10: AI Assist | ⬜ Not Started | Phase 4 |
+| M11: Admin MCP Server | ⬜ Not Started | Phase 4 |
 
-## Detailed Progress
+## Test Results
 
-### M1: Project Scaffolding
-- [ ] package.json created
-- [ ] integration.js entry point
-- [ ] .gitignore
-- [ ] README.md
+```
+Test Files  4 passed (4)
+Tests       59 passed (59)
+Duration    ~600ms
+```
 
-### M2: Authentication
-- [ ] Supabase client setup
-- [ ] AuthButton component
-- [ ] Login/logout flow
-- [ ] Token retrieval
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| schema.test.js | 10 | Dynamic COLLECTIONS from manifest, getDefaults, slugify |
+| content.test.js | 27 | parseFrontmatter, serializeFrontmatter, roundtrip, CRUD errors |
+| github.test.js | 10 | readFile, listFiles, writeFile, deleteFile (mocked) |
+| settings.test.js | 12 | parseConfig, parseSiteConfig, serializeConfig, serializeSiteConfig, generic exports |
 
-### M3: Frontend Edit UI
-- [ ] EditToolbar component
-- [ ] DragHandler with position capture
-- [ ] SnapGuides (grid snap, alignment)
-- [ ] Edit mode styles
-- [ ] Admin page
+## What Makes It Generic
 
-### M4: GitHub API Integration
-- [ ] readFile function
-- [ ] writeFile function
-- [ ] Save layout to data/layouts/
-- [ ] Trigger repository_dispatch
+### Auto-Discovery (no config needed)
+The integration reads `src/content/` at build time:
+- Scans subdirectories (blog/, services/, etc.)
+- Reads the first `.md/.mdx` file's frontmatter
+- Infers field types (boolean, number, date, tags, list, image, string)
+- Generates a manifest as a Vite `define` constant
 
-### M5: Layout Processing
-- [ ] process-layout.js script
-- [ ] CSS calculation from coordinates
-- [ ] MDX <style> block injection
-- [ ] Cleanup processed JSON
+### Explicit Override (for custom behavior)
+```js
+cmsAdmin({
+  collections: { blog: { label: 'Posts', folder: '...', fields: [...] } },
+  settings: { file: 'src/config.ts', exportName: 'SITE' },
+})
+```
 
-### M6: GitHub Actions Workflow
-- [ ] admin-layout.yml
-- [ ] Trigger on data/layouts/ push
-- [ ] Trigger on repository_dispatch
-- [ ] Commit processed changes
+### How It Follows Astro Docs
+- Uses `new URL('./frontend/pages/admin.astro', import.meta.url)` for `injectRoute`
+- Exports `"./admin.astro"` in package.json for npm resolution
+- Uses `config.root` with `fileURLToPath()` for cross-platform paths
+- Uses `logger` for build-time messages
+- Uses `vite.define` to pass manifest to client code
 
-### M7: Responsive Layout
-- [ ] Viewport toggle (mobile/tablet/desktop)
-- [ ] Per-breakpoint position capture
-- [ ] Media query CSS generation
+## File Inventory
 
-### M8: Polish & Security
-- [ ] Error handling
-- [ ] Token security
-- [ ] CSS sanitization
-- [ ] Documentation
+```
+cms-admin/
+├── package.json                  # v0.2.0, exports ./admin.astro
+├── vitest.config.js
+├── AGENTS.md
+├── PLAN.md
+├── PROGRESS.md
+├── .gitignore
+├── .github/workflows/ci.yml
+├── tests/
+│   ├── schema.test.js            # Dynamic collection tests
+│   ├── content.test.js           # Frontmatter parser tests
+│   ├── github.test.js            # Mocked API tests
+│   └── settings.test.js          # Generic config parser tests
+└── src/
+    ├── integration.js            # Astro integration (auto-discover + manifest)
+    └── frontend/
+        ├── lib/
+        │   ├── schema.js         # Reads __CMS_ADMIN_MANIFEST__ at runtime
+        │   ├── supabase.js       # Auth client
+        │   ├── github.js         # GitHub API wrapper
+        │   ├── content.js        # Content CRUD + YAML parser
+        │   ├── settings.js       # Generic config parser (any export name)
+        │   └── storage.js        # Supabase Storage upload
+        ├── components/
+        │   ├── AdminShell.astro  # Sidebar layout
+        │   ├── AuthButton.astro  # Login/logout
+        │   ├── CollectionList.astro
+        │   └── ContentEditor.astro
+        ├── pages/
+        │   └── admin.astro       # Main admin (dynamic collections + settings)
+        └── styles/
+            └── admin.css
+```
 
-## Decisions Made
+## Integration Options
 
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| Auth provider | Supabase Auth | No backend needed, supports GitHub |
-| OAuth flow | Standard (not Device) | Better UX, Supabase handles it |
-| Layout storage | GitHub API → data/layouts/ | No custom backend |
-| CSS processing | GitHub Actions | Server-side, hidden from users |
-| Package format | Astro integration | Clean install, auto-inject routes |
+```js
+// Minimal — works with any Astro project
+cmsAdmin()
 
-## Dependencies
+// With settings editor
+cmsAdmin({ settings: { file: 'src/config.ts', exportName: 'SITE' } })
 
-| Package | Purpose |
-|---------|---------|
-| @supabase/supabase-js | Auth + session management |
-| gray-matter | Parse MDX frontmatter |
-| astro (peer) | Integration API |
+// With custom route
+cmsAdmin({ route: '/manage' })
 
-## Environment Variables
+// With explicit collections (skip auto-discovery)
+cmsAdmin({
+  collections: {
+    blog: { label: 'Posts', folder: 'src/content/blog', icon: ' ', fields: [...] },
+  },
+})
+```
 
-| Variable | Where | Purpose |
-|----------|-------|---------|
-| SUPABASE_URL | .env (Astro) | Supabase project URL |
-| SUPABASE_ANON_KEY | .env (Astro) | Supabase public key |
-| SITE_REPO | GitHub secret | Target repo for commits |
-| ADMIN_TOKEN | GitHub secret | Token with repo write access |
+## Next Steps
+
+### Phase 3: Visual Layout Editing
+- Preview iframe showing the live site
+- Reuse ui-preview-mcp patterns (drag-and-drop, drawing canvas)
+- Position capture → CSS generation
+- Responsive viewport toggle
+
+### Phase 4: AI Assist + Admin MCP
+- Supabase Edge Function for streaming AI responses
+- Chat widget component in admin UI
+- Admin MCP server exposing same operations as UI
+- Tools: list_content, get_content, create_content, update_content, delete_content, upload_image, get_site_settings
+
+### Multi-Language Support
+- Content files with locale suffixes (blog/my-post.es.md)
+- Admin UI language switcher
+- Schema adds `locale` field
+- Coordinate with astro-website's i18n routing (en, tr, fa)

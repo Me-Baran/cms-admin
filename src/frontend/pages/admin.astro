@@ -1,0 +1,1185 @@
+---
+/**
+ * admin.astro — Main admin page.
+ *
+ * URL patterns:
+ *   /admin                           → Dashboard / welcome
+ *   /admin?collection=blog           → List blog posts
+ *   /admin?collection=blog&action=new → New blog post form
+ *   /admin?collection=blog&slug=my-post&action=edit → Edit blog post
+ *   /admin?view=settings             → Site settings
+ *
+ * This page is client-rendered — all data fetching happens in the browser
+ * via Supabase auth + GitHub API.
+ */
+
+import AdminShell from '../components/AdminShell.astro';
+import AuthButton from '../components/AuthButton.astro';
+import CollectionList from '../components/CollectionList.astro';
+import ContentEditor from '../components/ContentEditor.astro';
+import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
+
+// We can't do server-side data fetching here because this is a client-rendered admin.
+// The page renders a shell, and JavaScript handles loading data from GitHub API.
+---
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — CMS</title>
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+  <AdminShell>
+    <div slot="auth" id="auth-slot"></div>
+
+    <div id="admin-app">
+      <div class="loading-state" id="loading">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+      </div>
+
+      <div id="login-required" style="display:none;">
+        <div class="welcome-card">
+          <h1>CMS Admin</h1>
+          <p>Sign in with your GitHub account to manage content.</p>
+        </div>
+      </div>
+
+      <div id="main-content" style="display:none;">
+        <!-- Dynamic content rendered here by JS -->
+      </div>
+    </div>
+  </AdminShell>
+
+  <script>
+    import { getSession, getUser, onAuthStateChange } from '../lib/supabase.js';
+    import { listCollection, getContent } from '../lib/content.js';
+    import { COLLECTIONS, COLLECTION_KEYS, getDefaults } from '../lib/schema.js';
+
+    const $ = (sel) => document.querySelector(sel);
+    const $loading = $('#loading');
+    const $loginRequired = $('#login-required');
+    const $mainContent = $('#main-content');
+    const $authSlot = $('#auth-slot');
+
+    let currentUser = null;
+    let githubToken = null;
+
+    // Parse URL params
+    function getParams() {
+      const p = new URLSearchParams(window.location.search);
+      return {
+        collection: p.get('collection'),
+        action: p.get('action'),
+        slug: p.get('slug'),
+        view: p.get('view'),
+      };
+    }
+
+    // Render auth button
+    function renderAuth(user) {
+      if (user) {
+        $authSlot.innerHTML = `
+          <div class="auth-user">
+            <img src="${user.avatar}" alt="${user.name}" class="auth-avatar" />
+            <div class="auth-info">
+              <span class="auth-name">${user.name}</span>
+              <button id="logout-btn" class="auth-logout">Sign out</button>
+            </div>
+          </div>
+        `;
+        $('#logout-btn')?.addEventListener('click', async () => {
+          const { signOut } = await import('../lib/supabase.js');
+          await signOut();
+          window.location.reload();
+        });
+      } else {
+        $authSlot.innerHTML = `<button id="login-btn" class="auth-login">Sign in with GitHub</button>`;
+        $('#login-btn')?.addEventListener('click', async () => {
+          const { signInWithGitHub } = await import('../lib/supabase.js');
+          await signInWithGitHub();
+        });
+      }
+    }
+
+    // Render the dashboard
+    function renderDashboard() {
+      $mainContent.innerHTML = `
+        <div class="welcome-card">
+          <h1>Welcome to CMS Admin</h1>
+          <p>Select a collection from the sidebar to manage content.</p>
+          <div class="dashboard-cards">
+            ${COLLECTION_KEYS.map(key => {
+              const col = COLLECTIONS[key];
+              return `
+                <a href="/admin?collection=${key}" class="dashboard-card">
+                  <span class="dashboard-card-icon">${col.icon}</span>
+                  <span class="dashboard-card-label">${col.label}</span>
+                </a>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Render collection list
+    async function renderCollectionList(collectionName) {
+      const col = COLLECTIONS[collectionName];
+      if (!col) { renderDashboard(); return; }
+
+      $mainContent.innerHTML = `
+        <div class="collection-header">
+          <h1 class="collection-title">
+            <span class="collection-icon">${col.icon}</span>
+            ${col.label}
+          </h1>
+          <a href="/admin?collection=${collectionName}&action=new" class="btn btn-primary">
+            + New ${col.label.replace(/s$/, '')}
+          </a>
+        </div>
+        <div class="loading-state"><div class="spinner"></div><p>Loading ${col.label.toLowerCase()}...</p></div>
+      `;
+
+      try {
+        const items = await listCollection(githubToken, collectionName);
+        // Load frontmatter for each item (needed for display)
+        const loaded = [];
+        for (const item of items.slice(0, 50)) { // Limit to 50 for performance
+          try {
+            const content = await getContent(githubToken, collectionName, item.slug);
+            if (content) loaded.push(content);
+          } catch (e) {
+            console.warn(`Failed to load ${item.slug}:`, e);
+          }
+        }
+
+        if (loaded.length === 0) {
+          $mainContent.innerHTML = `
+            <div class="collection-header">
+              <h1 class="collection-title">
+                <span class="collection-icon">${col.icon}</span>
+                ${col.label}
+              </h1>
+              <a href="/admin?collection=${collectionName}&action=new" class="btn btn-primary">
+                + New ${col.label.replace(/s$/, '')}
+              </a>
+            </div>
+            <div class="empty-state">
+              <p>No ${col.label.toLowerCase()} yet.</p>
+              <a href="/admin?collection=${collectionName}&action=new" class="btn btn-primary">
+                Create your first ${col.label.replace(/s$/, '').toLowerCase()}
+              </a>
+            </div>
+          `;
+          return;
+        }
+
+        const rows = loaded.map(item => {
+          const title = item.data.title || item.data.name || item.data.question || '—';
+          const status = item.data.draft ? '<span class="status-badge draft">Draft</span>'
+            : item.data.featured ? '<span class="status-badge featured">Featured</span>'
+            : '<span class="status-badge published">Published</span>';
+          return `
+            <tr>
+              <td class="cell-slug"><code>${item.slug}</code></td>
+              <td class="cell-title">${title}</td>
+              <td class="cell-status">${status}</td>
+              <td class="cell-actions">
+                <a href="/admin?collection=${collectionName}&slug=${item.slug}&action=edit" class="btn btn-small">Edit</a>
+                <button class="btn btn-small btn-danger" data-delete="${collectionName}:${item.slug}">Delete</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        $mainContent.innerHTML = `
+          <div class="collection-header">
+            <h1 class="collection-title">
+              <span class="collection-icon">${col.icon}</span>
+              ${col.label}
+            </h1>
+            <a href="/admin?collection=${collectionName}&action=new" class="btn btn-primary">
+              + New ${col.label.replace(/s$/, '')}
+            </a>
+          </div>
+          <div class="item-list">
+            <table class="item-table">
+              <thead>
+                <tr><th>Slug</th><th>Title / Name</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+
+        // Attach delete handlers
+        $mainContent.querySelectorAll('[data-delete]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const [col, slug] = btn.dataset.delete.split(':');
+            if (!confirm(`Delete "${slug}"? This cannot be undone.`)) return;
+            try {
+              const { deleteContent } = await import('../lib/content.js');
+              const item = await getContent(githubToken, col, slug);
+              if (!item) { alert('Not found'); return; }
+              await deleteContent(githubToken, col, slug, item.sha);
+              renderCollectionList(col);
+            } catch (e) {
+              alert('Delete failed: ' + e.message);
+            }
+          });
+        });
+
+      } catch (e) {
+        $mainContent.innerHTML = `
+          <div class="error-state">
+            <h2>Failed to load</h2>
+            <p>${e.message}</p>
+            <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+          </div>
+        `;
+      }
+    }
+
+    // Render editor form
+    async function renderEditor(collectionName, slug, isNew) {
+      const col = COLLECTIONS[collectionName];
+      if (!col) { renderDashboard(); return; }
+
+      let item = null;
+      if (!isNew && slug) {
+        $mainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>`;
+        try {
+          item = await getContent(githubToken, collectionName, slug);
+          if (!item) {
+            $mainContent.innerHTML = `<div class="error-state"><h2>Not found</h2><p>"${slug}" does not exist in ${col.label}.</p><a href="/admin?collection=${collectionName}" class="btn btn-primary">Back to list</a></div>`;
+            return;
+          }
+        } catch (e) {
+          $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p></div>`;
+          return;
+        }
+      }
+
+      const fields = col.fields || [];
+      const data = item?.data || {};
+      const body = item?.body || '';
+      const itemSlug = item?.slug || '';
+      const sha = item?.sha || '';
+
+      const fieldsHtml = fields.map(field => {
+        if (field.name === 'body') return '';
+        const value = data[field.name] ?? field.default ?? '';
+        const req = field.required ? 'required' : '';
+
+        let input = '';
+        if (field.type === 'string') {
+          input = `<input type="text" name="${field.name}" value="${escapeHtml(String(value))}" class="field-input" ${req} />`;
+        } else if (field.type === 'text') {
+          input = `<textarea name="${field.name}" class="field-textarea" rows="3" ${req}>${escapeHtml(String(value))}</textarea>`;
+        } else if (field.type === 'number') {
+          input = `<input type="number" name="${field.name}" value="${value}" class="field-input" min="${field.min ?? ''}" max="${field.max ?? ''}" step="1" />`;
+        } else if (field.type === 'date') {
+          const dateVal = value ? String(value).split('T')[0] : '';
+          input = `<input type="date" name="${field.name}" value="${dateVal}" class="field-input" ${req} />`;
+        } else if (field.type === 'boolean') {
+          input = `<label class="field-checkbox"><input type="checkbox" name="${field.name}" ${value ? 'checked' : ''} /><span>${field.label}</span></label>`;
+        } else if (field.type === 'tags') {
+          const tagStr = Array.isArray(value) ? value.join(', ') : value;
+          input = `<input type="text" name="${field.name}" value="${escapeHtml(tagStr)}" class="field-input" placeholder="tag1, tag2, tag3" />`;
+        } else if (field.type === 'list') {
+          const items = Array.isArray(value) ? value : [];
+          const listItems = items.map(v => `
+            <div class="list-item">
+              <input type="text" name="${field.name}[]" value="${escapeHtml(String(v))}" class="field-input" />
+              <button type="button" class="btn-remove" title="Remove">&times;</button>
+            </div>
+          `).join('');
+          input = `
+            <div class="field-list" data-field="${field.name}">
+              <div class="list-items">${listItems}</div>
+              <button type="button" class="btn-add-item">+ Add</button>
+            </div>
+          `;
+        } else if (field.type === 'image') {
+          const preview = value ? `<div class="image-preview"><img src="${value}" alt="${field.label}" /></div>` : '';
+          input = `
+            <div class="field-image">
+              ${preview}
+              <input type="text" name="${field.name}" value="${escapeHtml(String(value))}" class="field-input" placeholder="/images/..." />
+              <p class="field-help">Enter a path or upload after saving.</p>
+            </div>
+          `;
+        } else if (field.type === 'repeatable') {
+          const items = Array.isArray(value) ? value : [];
+          const subfields = field.fields || [];
+          const repeatableItems = items.map((item, i) => {
+            const subInputs = subfields.map(sub => `
+              <div class="field-group field-group-nested">
+                <label class="field-label">${sub.label}</label>
+                ${sub.type === 'string'
+                  ? `<input type="text" name="${field.name}[${i}].${sub.name}" value="${escapeHtml(item[sub.name] || '')}" class="field-input" />`
+                  : `<textarea name="${field.name}[${i}].${sub.name}" class="field-textarea" rows="2">${escapeHtml(item[sub.name] || '')}</textarea>`
+                }
+              </div>
+            `).join('');
+            return `
+              <div class="repeatable-item">
+                <div class="repeatable-item-header"><span>Item ${i + 1}</span><button type="button" class="btn-remove" title="Remove">&times;</button></div>
+                ${subInputs}
+              </div>
+            `;
+          }).join('');
+          input = `
+            <div class="field-repeatable" data-field="${field.name}" data-subfields='${JSON.stringify(subfields)}'>
+              <div class="repeatable-items">${repeatableItems}</div>
+              <button type="button" class="btn-add-item">+ Add ${field.label.replace(/s$/, '')}</button>
+            </div>
+          `;
+        }
+
+        if (field.type === 'boolean') {
+          return `<div class="field-group">${input}</div>`;
+        }
+        return `
+          <div class="field-group">
+            <label class="field-label">${field.label}${field.required ? ' <span class="required">*</span>' : ''}</label>
+            ${input}
+          </div>
+        `;
+      }).join('');
+
+      const title = isNew ? `New ${col.label.replace(/s$/, '')}` : (data.title || data.name || slug);
+
+      $mainContent.innerHTML = `
+        <div class="editor-header">
+          <div class="editor-breadcrumb">
+            <a href="/admin?collection=${collectionName}">${col.label}</a>
+            <span class="breadcrumb-sep">/</span>
+            <span>${title}</span>
+          </div>
+        </div>
+        <form id="content-form" class="editor-form">
+          <input type="hidden" name="collection" value="${collectionName}" />
+          <input type="hidden" name="sha" value="${sha}" />
+          <input type="hidden" name="isNew" value="${isNew ? 'true' : 'false'}" />
+
+          ${!isNew ? `
+            <div class="field-group">
+              <label class="field-label">Slug</label>
+              <input type="text" name="slug" value="${itemSlug}" class="field-input" readonly />
+            </div>
+          ` : `
+            <div class="field-group">
+              <label class="field-label">Slug *</label>
+              <input type="text" name="slug" id="slug" class="field-input" required placeholder="my-item-slug" />
+              <p class="field-help">URL-safe identifier (lowercase, hyphens).</p>
+            </div>
+          `}
+
+          ${fieldsHtml}
+
+          <div class="field-group field-body">
+            <label class="field-label">Body</label>
+            <textarea name="body" class="field-textarea field-body-textarea" rows="20">${escapeHtml(body)}</textarea>
+          </div>
+
+          <div class="editor-actions">
+            <button type="submit" class="btn btn-primary btn-save">${isNew ? 'Create' : 'Save Changes'}</button>
+            <a href="/admin?collection=${collectionName}" class="btn btn-secondary">Cancel</a>
+            ${!isNew ? `<button type="button" class="btn btn-danger btn-delete-item" data-slug="${itemSlug}">Delete</button>` : ''}
+          </div>
+        </form>
+      `;
+
+      // Attach handlers
+      attachEditorHandlers(collectionName, isNew);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function attachEditorHandlers(collectionName, isNew) {
+      // List add/remove
+      document.querySelectorAll('.btn-add-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const container = btn.closest('.field-list, .field-repeatable');
+          const isRepeatable = container.classList.contains('field-repeatable');
+
+          if (isRepeatable) {
+            const subfields = JSON.parse(container.dataset.subfields || '[]');
+            const itemsDiv = container.querySelector('.repeatable-items');
+            const idx = itemsDiv.children.length;
+            const fieldName = container.dataset.field;
+            const div = document.createElement('div');
+            div.className = 'repeatable-item';
+            div.innerHTML = `
+              <div class="repeatable-item-header"><span>Item ${idx + 1}</span><button type="button" class="btn-remove">&times;</button></div>
+              ${subfields.map(sub => `
+                <div class="field-group field-group-nested">
+                  <label class="field-label">${sub.label}</label>
+                  ${sub.type === 'string'
+                    ? `<input type="text" name="${fieldName}[${idx}].${sub.name}" class="field-input" />`
+                    : `<textarea name="${fieldName}[${idx}].${sub.name}" class="field-textarea" rows="2"></textarea>`
+                  }
+                </div>
+              `).join('')}
+            `;
+            itemsDiv.appendChild(div);
+            attachRemove(div.querySelector('.btn-remove'));
+          } else {
+            const itemsDiv = container.querySelector('.list-items');
+            const fieldName = container.dataset.field;
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+              <input type="text" name="${fieldName}[]" class="field-input" />
+              <button type="button" class="btn-remove">&times;</button>
+            `;
+            itemsDiv.appendChild(div);
+            attachRemove(div.querySelector('.btn-remove'));
+          }
+        });
+      });
+
+      function attachRemove(btn) {
+        if (!btn) return;
+        btn.addEventListener('click', () => btn.closest('.list-item, .repeatable-item')?.remove());
+      }
+      document.querySelectorAll('.btn-remove').forEach(attachRemove);
+
+      // Auto-slug
+      const slugInput = document.querySelector('[name="slug"]');
+      const titleInput = document.querySelector('[name="title"], [name="name"], [name="question"]');
+      if (slugInput && titleInput && isNew) {
+        titleInput.addEventListener('input', () => {
+          if (!slugInput.dataset.manual) {
+            slugInput.value = titleInput.value.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
+          }
+        });
+        slugInput.addEventListener('input', () => { slugInput.dataset.manual = 'true'; });
+      }
+
+      // Form submit
+      document.getElementById('content-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const fd = new FormData(form);
+        const col = fd.get('collection');
+        const isNewItem = fd.get('isNew') === 'true';
+        const sha = fd.get('sha');
+        const slug = fd.get('slug');
+        if (!slug) { alert('Slug is required.'); return; }
+
+        const schema = COLLECTIONS[col];
+        const data = {};
+        for (const field of schema.fields) {
+          if (field.name === 'body') continue;
+          if (field.type === 'boolean') {
+            data[field.name] = fd.has(field.name);
+          } else if (field.type === 'tags') {
+            const raw = fd.get(field.name);
+            data[field.name] = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+          } else if (field.type === 'list') {
+            data[field.name] = fd.getAll(`${field.name}[]`).filter(Boolean);
+          } else if (field.type === 'number') {
+            const val = fd.get(field.name);
+            data[field.name] = val ? Number(val) : (field.default ?? 0);
+          } else if (field.type === 'repeatable') {
+            const items = [];
+            for (const [key, val] of fd.entries()) {
+              if (!key.startsWith(field.name + '[')) continue;
+              const match = key.match(/\[(\d+)\]\.(\w+)/);
+              if (!match) continue;
+              const idx = parseInt(match[1]);
+              while (items.length <= idx) items.push({});
+              items[idx][match[2]] = val;
+            }
+            data[field.name] = items;
+          } else {
+            const val = fd.get(field.name);
+            if (val !== null && val !== '') data[field.name] = val;
+          }
+        }
+        const body = fd.get('body') || '';
+
+        const btn = form.querySelector('.btn-save');
+        btn.textContent = 'Saving...';
+        btn.disabled = true;
+
+        try {
+          const { createContent, updateContent } = await import('../lib/content.js');
+          if (isNewItem) {
+            await createContent(githubToken, col, slug, data, body);
+          } else {
+            await updateContent(githubToken, col, slug, data, body, sha);
+          }
+          window.location.href = `/admin?collection=${col}`;
+        } catch (err) {
+          alert('Save failed: ' + err.message);
+          btn.textContent = isNewItem ? 'Create' : 'Save Changes';
+          btn.disabled = false;
+        }
+      });
+
+      // Delete button
+      document.querySelector('.btn-delete-item')?.addEventListener('click', async () => {
+        const slug = document.querySelector('.btn-delete-item').dataset.slug;
+        const col = document.querySelector('[name="collection"]').value;
+        if (!confirm(`Delete "${slug}"?`)) return;
+        try {
+          const { deleteContent } = await import('../lib/content.js');
+          const sha = document.querySelector('[name="sha"]').value;
+          await deleteContent(githubToken, col, slug, sha);
+          window.location.href = `/admin?collection=${col}`;
+        } catch (err) {
+          alert('Delete failed: ' + err.message);
+        }
+      });
+    }
+
+    // Render site settings — generic, works with any config file
+    async function renderSettings() {
+      $mainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading site settings...</p></div>`;
+
+      try {
+        const { readFile, writeFile } = await import('../lib/github.js');
+        const { parseConfig, parseSiteConfig, serializeSiteConfig } = await import('../lib/settings.js');
+        const { SETTINGS_CONFIG } = await import('../lib/schema.js');
+
+        if (!SETTINGS_CONFIG?.file) {
+          $mainContent.innerHTML = `
+            <div class="welcome-card">
+              <h1>Site Settings</h1>
+              <p>No settings file configured. Add <code>settings</code> to your cms-admin integration options:</p>
+              <pre style="background:#f1f3f5;padding:1rem;border-radius:6px;font-size:0.85rem;margin-top:1rem;overflow-x:auto;">cmsAdmin({ settings: { file: 'src/config.ts', exportName: 'SITE' } })</pre>
+            </div>
+          `;
+          return;
+        }
+
+        const configPath = SETTINGS_CONFIG.file;
+        const exportName = SETTINGS_CONFIG.exportName || 'SITE';
+        const explicitFields = SETTINGS_CONFIG.fields || null;
+
+        const file = await readFile(githubToken, configPath);
+        if (!file) {
+          $mainContent.innerHTML = `<div class="error-state"><h2>Config not found</h2><p>Could not find <code>${configPath}</code> in the repository.</p></div>`;
+          return;
+        }
+
+        const settings = parseSiteConfig(file.content);
+        if (!settings) {
+          $mainContent.innerHTML = `<div class="error-state"><h2>Parse error</h2><p>Could not parse <code>${configPath}</code>. Make sure it exports a const object.</p></div>`;
+          return;
+        }
+        const sha = file.sha;
+
+        // If explicit fields are provided, use them. Otherwise, auto-generate from the object.
+        const fields = explicitFields || autoGenerateFields(settings);
+
+        function getNestedValue(obj, path) {
+          return path.split('.').reduce((o, k) => o?.[k], obj);
+        }
+
+        function setNestedValue(obj, path, value) {
+          const keys = path.split('.');
+          const last = keys.pop();
+          let current = obj;
+          for (const k of keys) {
+            if (!current[k] || typeof current[k] !== 'object') current[k] = {};
+            current = current[k];
+          }
+          current[last] = value;
+        }
+
+        // Auto-generate fields from object structure
+        function autoGenerateFields(obj, prefix = '') {
+          const result = [];
+          for (const [key, value] of Object.entries(obj)) {
+            const fullKey = prefix ? `${prefix}.${key}` : key;
+            const label = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+
+            if (value === null || value === undefined) {
+              result.push({ key: fullKey, label, type: 'text', path: !!prefix });
+            } else if (typeof value === 'boolean') {
+              result.push({ key: fullKey, label, type: 'boolean', path: !!prefix });
+            } else if (typeof value === 'number') {
+              result.push({ key: fullKey, label, type: 'number', path: !!prefix });
+            } else if (Array.isArray(value)) {
+              if (value.length > 0 && typeof value[0] === 'object') {
+                // Array of objects — skip for now (complex)
+                result.push({ key: fullKey, label, type: 'json', path: !!prefix, value: JSON.stringify(value) });
+              } else {
+                result.push({ key: fullKey, label, type: 'list', path: !!prefix });
+              }
+            } else if (typeof value === 'object') {
+              // Nested object — recurse
+              result.push(...autoGenerateFields(value, fullKey));
+            } else {
+              // String
+              const isLong = String(value).length > 80;
+              result.push({ key: fullKey, label, type: isLong ? 'textarea' : 'text', path: !!prefix });
+            }
+          }
+          return result;
+        }
+
+        // Render form fields
+        const fieldsHtml = fields.map(f => {
+          const value = f.path ? getNestedValue(settings, f.key) : settings[f.key];
+          let input = '';
+
+          if (f.type === 'textarea') {
+            input = `<textarea name="${f.key}" class="field-textarea" rows="3">${escapeHtml(String(value ?? ''))}</textarea>`;
+          } else if (f.type === 'boolean') {
+            input = `<label class="field-checkbox"><input type="checkbox" name="${f.key}" ${value ? 'checked' : ''} /><span>${f.label}</span></label>`;
+          } else if (f.type === 'json') {
+            input = `<textarea name="${f.key}" class="field-textarea" rows="4" style="font-size:0.8rem;">${escapeHtml(f.value || JSON.stringify(value, null, 2))}</textarea>`;
+          } else if (f.type === 'list') {
+            const items = Array.isArray(value) ? value : [];
+            const listItems = items.map((v, i) => `
+              <div class="list-item">
+                <input type="text" name="${f.key}[]" value="${escapeHtml(String(v))}" class="field-input" />
+                <button type="button" class="btn-remove">&times;</button>
+              </div>
+            `).join('');
+            input = `
+              <div class="field-list" data-field="${f.key}">
+                <div class="list-items">${listItems}</div>
+                <button type="button" class="btn-add-item">+ Add</button>
+              </div>
+            `;
+          } else {
+            input = `<input type="${f.type === 'number' ? 'number' : 'text'}" name="${f.key}" value="${escapeHtml(String(value ?? ''))}" class="field-input" step="any" />`;
+          }
+
+          if (f.type === 'boolean') {
+            return `<div class="field-group">${input}</div>`;
+          }
+          return `
+            <div class="field-group">
+              <label class="field-label">${f.label}</label>
+              ${input}
+            </div>
+          `;
+        }).join('');
+
+        $mainContent.innerHTML = `
+          <div class="editor-header">
+            <div class="editor-breadcrumb">
+              <a href="/admin">Admin</a>
+              <span class="breadcrumb-sep">/</span>
+              <span>Site Settings</span>
+            </div>
+          </div>
+          <form id="settings-form" class="editor-form">
+            <h2 style="margin-bottom:1.5rem;font-size:1.2rem;">Site Settings</h2>
+            <p style="font-size:0.85rem;color:#666;margin-bottom:1.5rem;">
+              Editing <code>${configPath}</code>
+            </p>
+            ${fieldsHtml}
+            <div class="editor-actions">
+              <button type="submit" class="btn btn-primary btn-save">Save Settings</button>
+              <a href="/admin" class="btn btn-secondary">Cancel</a>
+            </div>
+          </form>
+        `;
+
+        // Attach list add/remove handlers
+        document.querySelectorAll('.btn-add-item').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const container = btn.closest('.field-list');
+            const fieldName = container.dataset.field;
+            const itemsDiv = container.querySelector('.list-items');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+              <input type="text" name="${fieldName}[]" class="field-input" />
+              <button type="button" class="btn-remove">&times;</button>
+            `;
+            itemsDiv.appendChild(div);
+            div.querySelector('.btn-remove').addEventListener('click', () => div.remove());
+          });
+        });
+
+        document.querySelectorAll('.btn-remove').forEach(btn => {
+          btn.addEventListener('click', () => btn.closest('.list-item')?.remove());
+        });
+
+        // Form submit
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const fd = new FormData(form);
+          const btn = form.querySelector('.btn-save');
+          btn.textContent = 'Saving...';
+          btn.disabled = true;
+
+          try {
+            const newSettings = { ...settings };
+
+            for (const f of fields) {
+              if (f.type === 'boolean') {
+                const val = fd.has(f.key);
+                if (f.path) setNestedValue(newSettings, f.key, val);
+                else newSettings[f.key] = val;
+              } else if (f.type === 'list') {
+                const values = fd.getAll(`${f.key}[]`).filter(Boolean);
+                if (f.path) setNestedValue(newSettings, f.key, values);
+                else newSettings[f.key] = values;
+              } else if (f.type === 'json') {
+                try {
+                  const val = fd.get(f.key);
+                  const parsed = JSON.parse(val);
+                  if (f.path) setNestedValue(newSettings, f.key, parsed);
+                  else newSettings[f.key] = parsed;
+                } catch {
+                  // Keep original value if JSON is invalid
+                }
+              } else {
+                const val = fd.get(f.key);
+                if (val === null || val === '') continue;
+                if (f.type === 'number') {
+                  const num = parseFloat(val);
+                  if (!isNaN(num)) {
+                    if (f.path) setNestedValue(newSettings, f.key, num);
+                    else newSettings[f.key] = num;
+                  }
+                } else {
+                  if (f.path) setNestedValue(newSettings, f.key, val);
+                  else newSettings[f.key] = val;
+                }
+              }
+            }
+
+            const newContent = serializeSiteConfig(file.content, newSettings, exportName);
+            await writeFile(githubToken, configPath, newContent, 'Update site settings', sha);
+            showToast('Settings saved successfully');
+          } catch (err) {
+            showToast('Save failed: ' + err.message, 'error');
+            btn.textContent = 'Save Settings';
+            btn.disabled = false;
+          }
+        });
+
+      } catch (e) {
+        $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p></div>`;
+      }
+    }
+
+    // Toast notification
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.classList.add('show'), 10);
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // Initialize
+    async function init() {
+      try {
+        const session = await getSession();
+        if (session) {
+          currentUser = await getUser();
+          githubToken = session.provider_token;
+        }
+      } catch (e) {
+        console.warn('Auth check failed:', e);
+      }
+
+      renderAuth(currentUser);
+
+      if (!currentUser) {
+        $loading.style.display = 'none';
+        $loginRequired.style.display = 'block';
+        return;
+      }
+
+      $loading.style.display = 'none';
+      $mainContent.style.display = 'block';
+
+      const params = getParams();
+
+      if (params.view === 'settings') {
+        await renderSettings();
+      } else if (params.action === 'new' && params.collection) {
+        await renderEditor(params.collection, null, true);
+      } else if (params.action === 'edit' && params.collection && params.slug) {
+        await renderEditor(params.collection, params.slug, false);
+      } else if (params.collection) {
+        await renderCollectionList(params.collection);
+      } else {
+        renderDashboard();
+      }
+    }
+
+    init();
+  </script>
+
+  <style>
+    /* Dashboard cards */
+    .welcome-card h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
+    .welcome-card p { color: #666; margin-bottom: 1.5rem; }
+
+    .dashboard-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+
+    .dashboard-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1.5rem;
+      background: #fff;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #333;
+      transition: all 0.15s;
+    }
+
+    .dashboard-card:hover {
+      border-color: #4A90D9;
+      box-shadow: 0 2px 8px rgba(74,144,217,0.15);
+      transform: translateY(-1px);
+    }
+
+    .dashboard-card-icon { font-size: 2rem; }
+    .dashboard-card-label { font-weight: 600; font-size: 0.9rem; }
+
+    /* Loading */
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+      color: #888;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #e9ecef;
+      border-top-color: #4A90D9;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-bottom: 0.75rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-state {
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .error-state h2 { color: #c0392b; margin-bottom: 0.5rem; }
+    .error-state p { color: #666; margin-bottom: 1rem; }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: #666;
+    }
+
+    .empty-state p { margin-bottom: 1rem; font-size: 1.1rem; }
+
+    /* Collection header */
+    .collection-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .collection-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0;
+    }
+
+    /* Table */
+    .item-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .item-table th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      background: #f1f3f5;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #666;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .item-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #f1f3f5;
+      font-size: 0.9rem;
+    }
+
+    .item-table tr:last-child td { border-bottom: none; }
+    .item-table tr:hover td { background: #f8f9fa; }
+
+    .cell-slug code {
+      font-size: 0.8rem;
+      background: #f1f3f5;
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      color: #555;
+    }
+
+    .cell-title { font-weight: 500; }
+
+    .status-badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .status-badge.published { background: #d4edda; color: #155724; }
+    .status-badge.draft { background: #fff3cd; color: #856404; }
+    .status-badge.featured { background: #cce5ff; color: #004085; }
+
+    .cell-actions { display: flex; gap: 0.4rem; }
+
+    /* Editor */
+    .editor-header { margin-bottom: 1.5rem; }
+
+    .editor-breadcrumb {
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .editor-breadcrumb a { color: #4A90D9; text-decoration: none; }
+    .editor-breadcrumb a:hover { text-decoration: underline; }
+    .breadcrumb-sep { margin: 0 0.4rem; color: #ccc; }
+
+    .editor-form {
+      background: #fff;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .field-group { margin-bottom: 1.25rem; }
+    .field-group-nested { margin-bottom: 0.75rem; }
+
+    .field-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 0.35rem;
+    }
+
+    .required { color: #c0392b; }
+
+    .field-input {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .field-input:focus {
+      outline: none;
+      border-color: #4A90D9;
+      box-shadow: 0 0 0 3px rgba(74,144,217,0.15);
+    }
+
+    .field-input[readonly] { background: #f8f9fa; color: #666; }
+
+    .field-textarea {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      resize: vertical;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .field-textarea:focus {
+      outline: none;
+      border-color: #4A90D9;
+      box-shadow: 0 0 0 3px rgba(74,144,217,0.15);
+    }
+
+    .field-body-textarea { min-height: 400px; font-size: 0.85rem; line-height: 1.6; }
+
+    .field-help { font-size: 0.75rem; color: #888; margin-top: 0.25rem; }
+
+    .field-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .field-checkbox input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: #4A90D9; }
+
+    .field-list .list-items,
+    .field-repeatable .repeatable-items {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .list-item { display: flex; gap: 0.5rem; align-items: center; }
+    .list-item .field-input { flex: 1; }
+
+    .repeatable-item {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      padding: 0.75rem;
+    }
+
+    .repeatable-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #555;
+    }
+
+    .btn-remove {
+      background: #fff0f0;
+      color: #c0392b;
+      border: 1px solid #f5c6cb;
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-remove:hover { background: #ffe0e0; }
+
+    .btn-add-item {
+      background: none;
+      border: 1px dashed #ccc;
+      border-radius: 6px;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      color: #666;
+      cursor: pointer;
+    }
+
+    .btn-add-item:hover { border-color: #4A90D9; color: #4A90D9; }
+
+    .field-image { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .image-preview img {
+      max-width: 200px;
+      max-height: 120px;
+      border-radius: 4px;
+      border: 1px solid #e9ecef;
+      object-fit: cover;
+    }
+
+    .editor-actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e9ecef;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 0.6rem 1.25rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+
+    .btn-primary { background: #4A90D9; color: #fff; }
+    .btn-primary:hover { background: #357abd; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-secondary { background: #f1f3f5; color: #333; }
+    .btn-secondary:hover { background: #e9ecef; }
+    .btn-small { padding: 0.3rem 0.6rem; font-size: 0.8rem; background: #f1f3f5; color: #333; }
+    .btn-small:hover { background: #e9ecef; }
+    .btn-danger { background: #fff0f0; color: #c0392b; margin-left: auto; }
+    .btn-danger:hover { background: #ffe0e0; }
+
+    /* Auth (sidebar) */
+    .auth-user { display: flex; align-items: center; gap: 0.6rem; }
+    .auth-avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+    .auth-info { display: flex; flex-direction: column; min-width: 0; }
+    .auth-name { font-size: 0.8rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .auth-logout { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 0.7rem; cursor: pointer; padding: 0; text-align: left; }
+    .auth-logout:hover { color: #ff6b6b; }
+    .auth-login { width: 100%; padding: 0.6rem 1rem; background: #4A90D9; color: #fff; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
+    .auth-login:hover { background: #357abd; }
+
+    /* Toast notifications */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #fff;
+      z-index: 10000;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast-success { background: #27ae60; }
+    .toast-error { background: #c0392b; }
+  </style>
+</body>
+</html>

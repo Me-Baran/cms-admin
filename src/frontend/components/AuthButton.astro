@@ -1,0 +1,111 @@
+---
+/**
+ * AuthButton.astro — Supabase GitHub OAuth login/logout.
+ */
+const { user = null } = Astro.props;
+---
+
+<div id="auth-section">
+  {user ? (
+    <div class="auth-user">
+      <img src={user.avatar} alt={user.name} class="auth-avatar" />
+      <div class="auth-info">
+        <span class="auth-name">{user.name}</span>
+        <button id="logout-btn" class="auth-logout">Sign out</button>
+      </div>
+    </div>
+  ) : (
+    <button id="login-btn" class="auth-login">
+      Sign in with GitHub
+    </button>
+  )}
+</div>
+
+<script>
+  import { signInWithGitHub, signOut } from '../lib/supabase.js';
+
+  const loginBtn = document.getElementById('login-btn');
+  const logoutBtn = document.getElementById('logout-btn');
+
+  if (loginBtn) {
+    loginBtn.addEventListener('click', async () => {
+      try {
+        await signInWithGitHub();
+      } catch (e) {
+        console.error('Login failed:', e);
+        alert('Login failed: ' + e.message);
+      }
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await signOut();
+        window.location.reload();
+      } catch (e) {
+        console.error('Logout failed:', e);
+      }
+    });
+  }
+</script>
+
+<style>
+  .auth-user {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .auth-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.2);
+  }
+
+  .auth-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .auth-name {
+    font-size: 0.8rem;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .auth-logout {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.5);
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+  }
+
+  .auth-logout:hover {
+    color: #ff6b6b;
+  }
+
+  .auth-login {
+    width: 100%;
+    padding: 0.6rem 1rem;
+    background: #4A90D9;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .auth-login:hover {
+    background: #357abd;
+  }
+</style>

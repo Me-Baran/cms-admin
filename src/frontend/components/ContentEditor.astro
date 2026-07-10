@@ -1,0 +1,644 @@
+---
+/**
+ * ContentEditor.astro — Form editor for a content item.
+ * Renders form fields dynamically from the collection schema.
+ */
+const { collection, collectionName, item = null, isNew = false } = Astro.props;
+
+const fields = collection.fields || [];
+const data = item?.data || {};
+const body = item?.body || '';
+const slug = item?.slug || '';
+const sha = item?.sha || '';
+---
+
+<div class="editor-header">
+  <div class="editor-breadcrumb">
+    <a href={`/admin?collection=${collectionName}`}>{collection.label}</a>
+    <span class="breadcrumb-sep">/</span>
+    <span>{isNew ? `New ${collection.label.replace(/s$/, '')}` : (data.title || data.name || slug)}</span>
+  </div>
+</div>
+
+<form id="content-form" class="editor-form">
+  <input type="hidden" name="collection" value={collectionName} />
+  <input type="hidden" name="sha" value={sha} />
+  <input type="hidden" name="isNew" value={isNew ? 'true' : 'false' />
+
+  {!isNew && (
+    <div class="field-group">
+      <label class="field-label">Slug</label>
+      <input type="text" name="slug" value={slug} class="field-input" readonly />
+      <p class="field-help">URL identifier. Cannot be changed after creation.</p>
+    </div>
+  )}
+
+  {isNew && (
+    <div class="field-group">
+      <label class="field-label" for="slug">Slug *</label>
+      <input type="text" name="slug" id="slug" class="field-input" required placeholder="my-item-slug" />
+      <p class="field-help">URL-safe identifier (lowercase, hyphens). Will be the filename.</p>
+    </div>
+  )}
+
+  {fields.map(field => {
+    if (field.name === 'body') return null; // Body handled separately
+    const value = data[field.name] ?? field.default ?? '';
+    const required = field.required ? 'required' : '';
+    return (
+      <div class="field-group">
+        <label class="field-label" for={`field-${field.name}`}>
+          {field.label}
+          {field.required && <span class="required">*</span>}
+        </label>
+
+        {field.type === 'string' && (
+          <input
+            type="text"
+            name={field.name}
+            id={`field-${field.name}`}
+            value={value}
+            class="field-input"
+            {...(required ? { required: true } : {})}
+          />
+        )}
+
+        {field.type === 'text' && (
+          <textarea
+            name={field.name}
+            id={`field-${field.name}`}
+            class="field-textarea"
+            rows="3"
+            {...(required ? { required: true } : {})}
+          >{value}</textarea>
+        )}
+
+        {field.type === 'number' && (
+          <input
+            type="number"
+            name={field.name}
+            id={`field-${field.name}`}
+            value={value}
+            class="field-input"
+            min={field.min ?? ''}
+            max={field.max ?? ''}
+            step="1"
+          />
+        )}
+
+        {field.type === 'date' && (
+          <input
+            type="date"
+            name={field.name}
+            id={`field-${field.name}`}
+            value={value ? String(value).split('T')[0] : ''}
+            class="field-input"
+            {...(required ? { required: true } : {})}
+          />
+        )}
+
+        {field.type === 'boolean' && (
+          <label class="field-checkbox">
+            <input
+              type="checkbox"
+              name={field.name}
+              id={`field-${field.name}`}
+              checked={!!value}
+            />
+            <span>{field.label}</span>
+          </label>
+        )}
+
+        {field.type === 'tags' && (
+          <input
+            type="text"
+            name={field.name}
+            id={`field-${field.name}`}
+            value={Array.isArray(value) ? value.join(', ') : value}
+            class="field-input"
+            placeholder="tag1, tag2, tag3"
+          />
+        )}
+
+        {field.type === 'list' && (
+          <div class="field-list" data-field={field.name} data-collection={field.collection || ''}>
+            <div class="list-items">
+              {Array.isArray(value) && value.map((v, i) => (
+                <div class="list-item">
+                  <input type="text" name={`${field.name}[]`} value={v} class="field-input" />
+                  <button type="button" class="btn-remove" title="Remove">&times;</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" class="btn-add-item">+ Add</button>
+          </div>
+        )}
+
+        {field.type === 'image' && (
+          <div class="field-image">
+            {value && (
+              <div class="image-preview">
+                <img src={value} alt={field.label} />
+              </div>
+            )}
+            <input type="text" name={field.name} value={value} class="field-input" placeholder="/images/..." />
+            <input type="file" accept="image/*" class="image-upload-input" data-target={field.name} />
+            <p class="field-help">Enter a path or upload an image.</p>
+          </div>
+        )}
+
+        {field.type === 'repeatable' && (
+          <div class="field-repeatable" data-field={field.name} data-subfields={JSON.stringify(field.fields)}>
+            <div class="repeatable-items">
+              {Array.isArray(value) && value.map((item, i) => (
+                <div class="repeatable-item">
+                  <div class="repeatable-item-header">
+                    <span>Item {i + 1}</span>
+                    <button type="button" class="btn-remove" title="Remove">&times;</button>
+                  </div>
+                  {field.fields.map(sub => (
+                    <div class="field-group field-group-nested">
+                      <label class="field-label">{sub.label}</label>
+                      {sub.type === 'string' ? (
+                        <input type="text" name={`${field.name}[${i}].${sub.name}`} value={item[sub.name] || ''} class="field-input" />
+                      ) : (
+                        <textarea name={`${field.name}[${i}].${sub.name}`} class="field-textarea" rows="2">{item[sub.name] || ''}</textarea>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <button type="button" class="btn-add-item">+ Add {field.label.replace(/s$/, '')}</button>
+          </div>
+        )}
+      </div>
+    );
+  })}
+
+  {/* Markdown body field */}
+  <div class="field-group field-body">
+    <label class="field-label" for="field-body">
+      Body {fields.some(f => f.name === 'body' && f.required) && <span class="required">*</span>}
+    </label>
+    <textarea
+      name="body"
+      id="field-body"
+      class="field-textarea field-body-textarea"
+      rows="20"
+    >{body}</textarea>
+  </div>
+
+  <div class="editor-actions">
+    <button type="submit" class="btn btn-primary btn-save">
+      {isNew ? 'Create' : 'Save Changes'}
+    </button>
+    <a href={`/admin?collection=${collectionName}`} class="btn btn-secondary">Cancel</a>
+    {!isNew && (
+      <button type="button" class="btn btn-danger btn-delete-item" data-slug={slug}>
+        Delete
+      </button>
+    )}
+  </div>
+</form>
+
+<script>
+  import { getGitHubToken } from '../lib/supabase.js';
+  import { createContent, updateContent, getContent, deleteContent } from '../lib/content.js';
+  import { uploadImage } from '../lib/github.js';
+  import { COLLECTIONS, slugify, getDefaults } from '../lib/schema.js';
+
+  // List item add/remove
+  document.querySelectorAll('.btn-add-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const container = btn.closest('.field-list, .field-repeatable');
+      const isRepeatable = container.classList.contains('field-repeatable');
+
+      if (isRepeatable) {
+        const subfields = JSON.parse(container.dataset.subfields || '[]');
+        const itemsDiv = container.querySelector('.repeatable-items');
+        const idx = itemsDiv.children.length;
+        const fieldName = container.dataset.field;
+
+        const div = document.createElement('div');
+        div.className = 'repeatable-item';
+        div.innerHTML = `
+          <div class="repeatable-item-header">
+            <span>Item ${idx + 1}</span>
+            <button type="button" class="btn-remove" title="Remove">&times;</button>
+          </div>
+          ${subfields.map(sub => `
+            <div class="field-group field-group-nested">
+              <label class="field-label">${sub.label}</label>
+              ${sub.type === 'string'
+                ? `<input type="text" name="${fieldName}[${idx}].${sub.name}" class="field-input" />`
+                : `<textarea name="${fieldName}[${idx}].${sub.name}" class="field-textarea" rows="2"></textarea>`
+              }
+            </div>
+          `).join('')}
+        `;
+        itemsDiv.appendChild(div);
+        attachRemove(div.querySelector('.btn-remove'));
+      } else {
+        const itemsDiv = container.querySelector('.list-items');
+        const fieldName = container.dataset.field;
+        const div = document.createElement('div');
+        div.className = 'list-item';
+        div.innerHTML = `
+          <input type="text" name="${fieldName}[]" class="field-input" />
+          <button type="button" class="btn-remove" title="Remove">&times;</button>
+        `;
+        itemsDiv.appendChild(div);
+        attachRemove(div.querySelector('.btn-remove'));
+      }
+    });
+  });
+
+  function attachRemove(btn) {
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      btn.closest('.list-item, .repeatable-item')?.remove();
+    });
+  }
+
+  document.querySelectorAll('.btn-remove').forEach(attachRemove);
+
+  // Image upload
+  document.querySelectorAll('.image-upload-input').forEach(input => {
+    input.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const targetName = input.dataset.target;
+      try {
+        const token = await getGitHubToken();
+        if (!token) { alert('Please sign in first.'); return; }
+        const collection = document.querySelector('[name="collection"]').value;
+        const result = await uploadImage(token, file, collection);
+        const targetInput = document.querySelector(`[name="${targetName}"]`);
+        if (targetInput) targetInput.value = result.url;
+        // Show preview
+        const preview = input.closest('.field-image')?.querySelector('.image-preview img');
+        if (preview) preview.src = result.url;
+        alert('Image uploaded!');
+      } catch (err) {
+        alert('Upload failed: ' + err.message);
+      }
+    });
+  });
+
+  // Auto-generate slug from title
+  const slugInput = document.querySelector('[name="slug"]');
+  const titleInput = document.querySelector('[name="title"], [name="name"], [name="question"]');
+  if (slugInput && titleInput && slugInput.closest('[name="isNew"][value="true"]')) {
+    titleInput.addEventListener('input', () => {
+      if (!slugInput.dataset.manual) {
+        slugInput.value = slugify(titleInput.value);
+      }
+    });
+    slugInput.addEventListener('input', () => {
+      slugInput.dataset.manual = 'true';
+    });
+  }
+
+  // Form submission
+  document.getElementById('content-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData(form);
+    const collectionName = formData.get('collection');
+    const isNew = formData.get('isNew') === 'true';
+    const sha = formData.get('sha');
+    const slug = formData.get('slug');
+
+    if (!slug) { alert('Slug is required.'); return; }
+
+    const col = COLLECTIONS[collectionName];
+    const data = {};
+
+    for (const field of col.fields) {
+      if (field.name === 'body') continue;
+
+      if (field.type === 'boolean') {
+        data[field.name] = formData.has(field.name);
+      } else if (field.type === 'tags' || field.type === 'list') {
+        const raw = formData.get(field.name);
+        if (raw && typeof raw === 'string') {
+          data[field.name] = raw.split(',').map(s => s.trim()).filter(Boolean);
+        } else {
+          // Multiple inputs with same name
+          const values = formData.getAll(`${field.name}[]`).filter(Boolean);
+          data[field.name] = values;
+        }
+      } else if (field.type === 'number') {
+        const val = formData.get(field.name);
+        data[field.name] = val ? Number(val) : (field.default ?? 0);
+      } else if (field.type === 'repeatable') {
+        const items = [];
+        const subfields = field.fields || [];
+        // Parse repeatable items from form names like fieldName[0].subfield
+        const prefix = field.name + '[';
+        for (const [key, val] of formData.entries()) {
+          if (!key.startsWith(prefix)) continue;
+          const match = key.match(/\[(\d+)\]\.(\w+)/);
+          if (!match) continue;
+          const idx = parseInt(match[1]);
+          const subName = match[2];
+          while (items.length <= idx) items.push({});
+          items[idx][subName] = val;
+        }
+        data[field.name] = items;
+      } else {
+        const val = formData.get(field.name);
+        if (val !== null && val !== '') data[field.name] = val;
+      }
+    }
+
+    const body = formData.get('body') || '';
+
+    const btn = form.querySelector('.btn-save');
+    const originalText = btn.textContent;
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+
+    try {
+      const token = await getGitHubToken();
+      if (!token) { alert('Please sign in first.'); return; }
+
+      if (isNew) {
+        await createContent(token, collectionName, slug, data, body);
+      } else {
+        await updateContent(token, collectionName, slug, data, body, sha);
+      }
+
+      window.location.href = `/admin?collection=${collectionName}`;
+    } catch (err) {
+      alert('Save failed: ' + err.message);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  });
+
+  // Delete button
+  const deleteBtn = document.querySelector('.btn-delete-item');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const slug = deleteBtn.dataset.slug;
+      const collection = document.querySelector('[name="collection"]').value;
+      if (!confirm(`Delete "${slug}"? This cannot be undone.`)) return;
+
+      try {
+        const token = await getGitHubToken();
+        if (!token) { alert('Please sign in first.'); return; }
+        const sha = document.querySelector('[name="sha"]').value;
+        await deleteContent(token, collection, slug, sha);
+        window.location.href = `/admin?collection=${collection}`;
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    });
+  }
+</script>
+
+<style>
+  .editor-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .editor-breadcrumb {
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  .editor-breadcrumb a {
+    color: #4A90D9;
+    text-decoration: none;
+  }
+
+  .editor-breadcrumb a:hover { text-decoration: underline; }
+
+  .breadcrumb-sep {
+    margin: 0 0.4rem;
+    color: #ccc;
+  }
+
+  .editor-form {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  .field-group {
+    margin-bottom: 1.25rem;
+  }
+
+  .field-group-nested {
+    margin-bottom: 0.75rem;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 0.35rem;
+  }
+
+  .required { color: #c0392b; }
+
+  .field-input {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+
+  .field-input:focus {
+    outline: none;
+    border-color: #4A90D9;
+    box-shadow: 0 0 0 3px rgba(74,144,217,0.15);
+  }
+
+  .field-input[readonly] {
+    background: #f8f9fa;
+    color: #666;
+  }
+
+  .field-textarea {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    resize: vertical;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+
+  .field-textarea:focus {
+    outline: none;
+    border-color: #4A90D9;
+    box-shadow: 0 0 0 3px rgba(74,144,217,0.15);
+  }
+
+  .field-body-textarea {
+    min-height: 400px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  .field-help {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 0.25rem;
+  }
+
+  .field-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+
+  .field-checkbox input[type="checkbox"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    accent-color: #4A90D9;
+  }
+
+  .field-list .list-items,
+  .field-repeatable .repeatable-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .list-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .list-item .field-input {
+    flex: 1;
+  }
+
+  .repeatable-item {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 0.75rem;
+  }
+
+  .repeatable-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #555;
+  }
+
+  .btn-remove {
+    background: #fff0f0;
+    color: #c0392b;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-remove:hover {
+    background: #ffe0e0;
+  }
+
+  .btn-add-item {
+    background: none;
+    border: 1px dashed #ccc;
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    color: #666;
+    cursor: pointer;
+  }
+
+  .btn-add-item:hover {
+    border-color: #4A90D9;
+    color: #4A90D9;
+  }
+
+  .field-image {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .image-preview img {
+    max-width: 200px;
+    max-height: 120px;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+    object-fit: cover;
+  }
+
+  .image-upload-input {
+    font-size: 0.8rem;
+  }
+
+  .editor-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e9ecef;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 0.6rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: #4A90D9;
+    color: #fff;
+  }
+
+  .btn-primary:hover { background: #357abd; }
+  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: #f1f3f5;
+    color: #333;
+  }
+
+  .btn-secondary:hover { background: #e9ecef; }
+
+  .btn-danger {
+    background: #fff0f0;
+    color: #c0392b;
+    margin-left: auto;
+  }
+
+  .btn-danger:hover { background: #ffe0e0; }
+</style>
