@@ -163,8 +163,11 @@ export async function listDirectory(token, dirPath, ref) {
           size: item.size || 0,
         }));
     }
-  } catch {
-    // Fall through to contents API
+
+    // Tree API failed — fall through to contents API
+    console.warn(`[cms-admin] Tree API returned ${resp.status} for ${dirPath}, falling back to contents API`);
+  } catch (e) {
+    console.warn('[cms-admin] Tree API error, falling back to contents API:', e.message);
   }
 
   // Fallback: contents API (non-recursive, one level at a time)

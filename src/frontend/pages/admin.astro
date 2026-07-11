@@ -847,6 +847,7 @@ import '../styles/admin.css';
         ]);
 
         mediaData = loaded;
+        console.log(`[cms-admin] Media library: ${images.length} images found in repo, ${Object.keys(mediaData.images).length} entries in _media.json`);
 
         // Bootstrap: add any repo images not yet in _media.json
         for (const img of images) {
@@ -870,6 +871,7 @@ import '../styles/admin.css';
 
         renderMediaGrid();
       } catch (e) {
+        console.error('[cms-admin] Media library error:', e);
         $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p><button class="btn btn-primary" onclick="location.reload()">Retry</button></div>`;
       }
     }
@@ -907,7 +909,7 @@ import '../styles/admin.css';
           </div>
         </div>
         <div class="media-stats">${imageCount} image${imageCount !== 1 ? 's' : ''}</div>
-        <div class="media-grid" id="media-grid">${cards || '<div class="empty-state"><p>No images yet. Upload or add a URL to get started.</p></div>'}</div>
+        <div class="media-grid" id="media-grid">${cards || '<div class="empty-state"><p>No images yet. Upload files, add a URL, or check the browser console for API errors.</p></div>'}</div>
         <div id="media-detail" class="media-detail" style="display:none;"></div>
         <div id="media-upload-overlay" class="media-upload-overlay" style="display:none;">
           <div class="media-upload-zone">
