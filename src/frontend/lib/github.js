@@ -138,6 +138,59 @@ export async function deleteFile(token, path, message, sha) {
 }
 
 /**
+ * Recursively list all files in a directory.
+ * Uses the Git Tree API for efficiency, falls back to Contents API.
+ * Returns array of { name, path, sha, type, size }.
+ */
+export async function listDirectory(token, dirPath, ref) {
+  const repo = getSiteRepo();
+  if (!ref) ref = getDefaultBranch();
+
+  // Try tree API first (single request for entire subtree)
+  try {
+    const url = `${GITHUB_API}/repos/${repo}/git/trees/${ref}:${dirPath}?recursive=1`;
+    const resp = await fetch(url, { headers: headers(token) });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      return (data.tree || [])
+        .filter(item => item.type === 'blob')
+        .map(item => ({
+          name: item.path.split('/').pop(),
+          path: `${dirPath}/${item.path}`,
+          sha: item.sha,
+          type: 'file',
+          size: item.size || 0,
+        }));
+    }
+  } catch {
+    // Fall through to contents API
+  }
+
+  // Fallback: contents API (non-recursive, one level at a time)
+  return listDirectoryRecursive(token, dirPath, ref);
+}
+
+/**
+ * Recursively list files using the Contents API (fallback).
+ */
+async function listDirectoryRecursive(token, dirPath, ref) {
+  const items = await listFiles(token, dirPath, ref);
+  const results = [];
+
+  for (const item of items) {
+    if (item.type === 'file') {
+      results.push(item);
+    } else if (item.type === 'dir') {
+      const subItems = await listDirectoryRecursive(token, item.path, ref);
+      results.push(...subItems);
+    }
+  }
+
+  return results;
+}
+
+/**
  * Upload an image to the repo.
  * Stores in public/images/uploads/ with a unique filename.
  */

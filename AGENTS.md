@@ -150,27 +150,27 @@ SITE_REPO=yourname/astro-website
 ## Work State
 
 ### Completed
-- (none yet)
+- Project scaffolding
+- Authentication (Supabase GitHub OAuth)
+- Content editor UI (dynamic form fields)
+- GitHub API integration (CRUD for content)
+- Site settings editor
+- Supabase Storage upload
+- Generic package (auto-discover collections from any Astro project)
+- Media library (browse, upload, alt text, SEO metadata)
 
 ### Active
-- Project scaffolding
+- (none)
 
 ### Planned
-- [ ] Astro integration setup
-- [ ] Supabase auth client
-- [ ] Edit toolbar component
-- [ ] Drag handler (raw pixel capture)
-- [ ] Drawing canvas (raw coordinate capture)
-- [ ] Viewport toggle (responsive preview)
+- [ ] Visual layout editing (Phase 3)
 - [ ] Supabase Edge Function: calculate-position
 - [ ] Supabase Edge Function: save-layout
 - [ ] Supabase Edge Function: ai-assist (streaming)
 - [ ] Chat widget (AI interface)
 - [ ] Command applier (apply AI commands)
-- [ ] GitHub API file operations
-- [ ] Layout processing script
 - [ ] GitHub Actions workflow
-- [ ] Admin page route injection
+- [ ] Admin MCP server
 
 ### Blocked
 - (none)

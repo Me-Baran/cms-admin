@@ -1,6 +1,6 @@
 # cms-admin Progress
 
-## Status: Phase 1-2 Complete, Generic Package
+## Status: Phase 1-2 Complete, Generic Package + Media Library
 
 ## Milestones
 
@@ -14,6 +14,7 @@
 | M6: Supabase Storage Upload | ✅ Complete | Phase 2 |
 | M7: Tests & CI | ✅ Complete | Phase 1-2 |
 | M8: Generic Package (any Astro project) | ✅ Complete | Refactor |
+| M8.5: Media Library | ✅ Complete | Phase 2.5 |
 | M9: Visual Layout Editing | ⬜ Not Started | Phase 3 |
 | M10: AI Assist | ⬜ Not Started | Phase 4 |
 | M11: Admin MCP Server | ⬜ Not Started | Phase 4 |
@@ -21,8 +22,8 @@
 ## Test Results
 
 ```
-Test Files  4 passed (4)
-Tests       59 passed (59)
+Test Files  5 passed (5)
+Tests       72 passed (72)
 Duration    ~600ms
 ```
 
@@ -32,6 +33,7 @@ Duration    ~600ms
 | content.test.js | 27 | parseFrontmatter, serializeFrontmatter, roundtrip, CRUD errors |
 | github.test.js | 10 | readFile, listFiles, writeFile, deleteFile (mocked) |
 | settings.test.js | 12 | parseConfig, parseSiteConfig, serializeConfig, serializeSiteConfig, generic exports |
+| media.test.js | 13 | loadMedia, saveMedia, addExternalUrl, updateMetadata, deleteMedia, scanImages, scanUsage |
 
 ## What Makes It Generic
 
@@ -72,24 +74,26 @@ cms-admin/
 │   ├── schema.test.js            # Dynamic collection tests
 │   ├── content.test.js           # Frontmatter parser tests
 │   ├── github.test.js            # Mocked API tests
-│   └── settings.test.js          # Generic config parser tests
+│   ├── settings.test.js          # Generic config parser tests
+│   └── media.test.js             # Media library tests
 └── src/
     ├── integration.js            # Astro integration (auto-discover + manifest)
     └── frontend/
         ├── lib/
         │   ├── schema.js         # Reads __CMS_ADMIN_MANIFEST__ at runtime
         │   ├── supabase.js       # Auth client
-        │   ├── github.js         # GitHub API wrapper
+        │   ├── github.js         # GitHub API wrapper (+ listDirectory)
         │   ├── content.js        # Content CRUD + YAML parser
         │   ├── settings.js       # Generic config parser (any export name)
-        │   └── storage.js        # Supabase Storage upload
+        │   ├── storage.js        # Supabase Storage upload
+        │   └── media.js          # Media library CRUD + metadata
         ├── components/
-        │   ├── AdminShell.astro  # Sidebar layout
+        │   ├── AdminShell.astro  # Sidebar layout (+ Media nav)
         │   ├── AuthButton.astro  # Login/logout
         │   ├── CollectionList.astro
         │   └── ContentEditor.astro
         ├── pages/
-        │   └── admin.astro       # Main admin (dynamic collections + settings)
+        │   └── admin.astro       # Main admin (dynamic collections + settings + media library)
         └── styles/
             └── admin.css
 ```
