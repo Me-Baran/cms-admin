@@ -1,27 +1,59 @@
-MIT License with Attribution
+# Astro Visual CMS Community License
+
+Version 1.0 - July 2026
 
 Copyright (c) 2026 Me-Baran
-Source: https://github.com/Me-Baran/cms-admin
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Permission
 
-1. The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, modify, and distribute the Software, subject to the conditions below.
 
-2. Any project, product, or service that uses this software must include a
-visible attribution to the original source repository:
-   "cms-admin" by Me-Baran (https://github.com/Me-Baran/cms-admin)
-This attribution must appear in the project's README, documentation, or about page.
+## Allowed Use
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The Community License allows use of the Software for:
+
+* Personal websites and personal projects
+* Learning and educational purposes
+* Open-source projects
+* Non-commercial projects
+
+## Attribution Requirement
+
+When using the Software, you must provide attribution.
+
+Attribution may be provided by:
+
+* Including a reference to Astro Visual CMS in project documentation
+* Including a link to the original repository
+* Keeping copyright notices included with the Software
+
+The attribution requirement does not require displaying branding in the end-user interface unless explicitly agreed separately.
+
+## Commercial Use Restriction
+
+Commercial use of the Software is not permitted under this license.
+
+A Commercial License is required for:
+
+* Websites or applications created for clients
+* Use by companies or organizations for business purposes
+* Agency projects
+* SaaS products
+* Paid products or services
+* Selling, sublicensing, or redistributing the Software as part of a commercial offering
+
+For commercial licensing options, contact:
+
+me@baran.dev
+
+## Contributions
+
+Contributions to the Software are welcome.
+
+By submitting contributions, you agree that your contributions may be distributed under the same license as the Software.
+
+## Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
