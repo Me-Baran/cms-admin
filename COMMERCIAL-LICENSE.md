@@ -49,7 +49,7 @@ Commercial licensing terms, pricing, and additional rights are provided separate
 
 Contact:
 
-me@baran.dev
+me.baran2023@gmail.com
 
 ## Copyright
 
