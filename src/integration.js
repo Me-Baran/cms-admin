@@ -16,6 +16,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 export default function cmsAdmin(options = {}) {
   const adminRoute = options.route || '/admin';
@@ -36,17 +37,24 @@ export default function cmsAdmin(options = {}) {
           : fileURLToPath(config.root);
         const collections = options.collections || discoverCollections(siteRoot, logger);
 
+        // Auto-detect repo and branch from git remote
+        const gitInfo = detectGitInfo(siteRoot, logger);
+        const repo = options.repo || gitInfo.repo || '';
+        const branch = options.branch || gitInfo.branch || 'main';
+
         // Write manifest for the admin page to read at runtime
         const manifest = {
           collections,
           settings: options.settings || discoverSettings(siteRoot, logger),
         };
 
-        // Pass manifest via Vite define (available at build time)
+        // Pass manifest + git info via Vite define (available at build time)
         updateConfig({
           vite: {
             define: {
               __CMS_ADMIN_MANIFEST__: JSON.stringify(manifest),
+              __CMS_ADMIN_REPO__: JSON.stringify(repo),
+              __CMS_ADMIN_BRANCH__: JSON.stringify(branch),
             },
             resolve: {
               alias: {
@@ -58,6 +66,7 @@ export default function cmsAdmin(options = {}) {
 
         logger.info(`Admin route: ${adminRoute}`);
         logger.info(`Collections: ${Object.keys(collections).join(', ')}`);
+        logger.info(`Git repo: ${repo} @ ${branch}`);
       },
     },
   };
@@ -187,4 +196,38 @@ function discoverSettings(siteRoot, logger) {
     };
   }
   return null;
+}
+
+/**
+ * Auto-detect git repo and branch from the project's git remote.
+ * Returns { repo: 'owner/name', branch: 'main' } or empty values.
+ */
+function detectGitInfo(siteRoot, logger) {
+  try {
+    const remote = execSync('git remote get-url origin', {
+      cwd: siteRoot,
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+
+    // Parse owner/repo from HTTPS or SSH URL
+    // https://github.com/Me-Baran/astro-website.git → Me-Baran/astro-website
+    // git@github.com:Me-Baran/astro-website.git → Me-Baran/astro-website
+    let repo = '';
+    const httpsMatch = remote.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+    if (httpsMatch) {
+      repo = `${httpsMatch[1]}/${httpsMatch[2]}`;
+    }
+
+    const branch = execSync('git branch --show-current', {
+      cwd: siteRoot,
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim() || 'main';
+
+    return { repo, branch };
+  } catch (e) {
+    logger.warn('Could not detect git info: ' + e.message);
+    return { repo: '', branch: 'main' };
+  }
 }

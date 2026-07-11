@@ -21,19 +21,32 @@ function headers(token) {
 }
 
 /**
- * Get the site repo from env or config.
- * Format: "owner/repo" (e.g. "brightsmiledental/astro-website")
+ * Get the site repo — auto-detected from git remote at build time,
+ * or falls back to PUBLIC_SITE_REPO env var.
  */
 export function getSiteRepo() {
-  return import.meta.env.PUBLIC_SITE_REPO || '';
+  // @ts-ignore — injected by integration at build time
+  return (typeof __CMS_ADMIN_REPO__ !== 'undefined' && __CMS_ADMIN_REPO__)
+    || import.meta.env.PUBLIC_SITE_REPO
+    || '';
+}
+
+/**
+ * Get the default branch — auto-detected from git at build time.
+ */
+export function getDefaultBranch() {
+  // @ts-ignore — injected by integration at build time
+  return (typeof __CMS_ADMIN_BRANCH__ !== 'undefined' && __CMS_ADMIN_BRANCH__)
+    || 'main';
 }
 
 /**
  * Read a file from the repo.
  * Returns { content, sha } or null if not found.
  */
-export async function readFile(token, path, ref = 'main') {
+export async function readFile(token, path, ref) {
   const repo = getSiteRepo();
+  if (!ref) ref = getDefaultBranch();
   const url = `${GITHUB_API}/repos/${repo}/contents/${path}?ref=${ref}`;
 
   const resp = await fetch(url, { headers: headers(token) });
@@ -52,8 +65,9 @@ export async function readFile(token, path, ref = 'main') {
  * List files in a directory.
  * Returns array of { name, path, sha, type }.
  */
-export async function listFiles(token, dirPath, ref = 'main') {
+export async function listFiles(token, dirPath, ref) {
   const repo = getSiteRepo();
+  if (!ref) ref = getDefaultBranch();
   const url = `${GITHUB_API}/repos/${repo}/contents/${dirPath}?ref=${ref}`;
 
   const resp = await fetch(url, { headers: headers(token) });
@@ -84,7 +98,7 @@ export async function writeFile(token, path, content, message, sha = null) {
   const body = {
     message,
     content: btoa(content),
-    branch: 'main',
+    branch: getDefaultBranch(),
   };
   if (sha) body.sha = sha;
 
@@ -112,7 +126,7 @@ export async function deleteFile(token, path, message, sha) {
   const resp = await fetch(url, {
     method: 'DELETE',
     headers: headers(token),
-    body: JSON.stringify({ message, sha, branch: 'main' }),
+    body: JSON.stringify({ message, sha, branch: getDefaultBranch() }),
   });
 
   if (!resp.ok) {

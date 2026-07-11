@@ -18,6 +18,7 @@ import AuthButton from '../components/AuthButton.astro';
 import CollectionList from '../components/CollectionList.astro';
 import ContentEditor from '../components/ContentEditor.astro';
 import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
+import '../styles/admin.css';
 
 // We can't do server-side data fetching here because this is a client-rendered admin.
 // The page renders a shell, and JavaScript handles loading data from GitHub API.
@@ -28,7 +29,6 @@ import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Admin — CMS</title>
-  <link rel="stylesheet" href="/admin.css" />
 </head>
 <body>
   <AdminShell>
@@ -517,9 +517,14 @@ import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
           } else {
             await updateContent(githubToken, col, slug, data, body, sha);
           }
-          window.location.href = `/admin?collection=${col}`;
+          btn.textContent = 'Saved ✓';
+          btn.style.background = '#27ae60';
+          showToast('Content saved. Deploy will trigger shortly.');
+          setTimeout(() => {
+            window.location.href = `/admin?collection=${col}`;
+          }, 1000);
         } catch (err) {
-          alert('Save failed: ' + err.message);
+          showToast('Save failed: ' + err.message, 'error');
           btn.textContent = isNewItem ? 'Create' : 'Save Changes';
           btn.disabled = false;
         }
@@ -758,7 +763,14 @@ import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
 
             const newContent = serializeSiteConfig(file.content, newSettings, exportName);
             await writeFile(githubToken, configPath, newContent, 'Update site settings', sha);
-            showToast('Settings saved successfully');
+            btn.textContent = 'Saved ✓';
+            btn.style.background = '#27ae60';
+            showToast('Settings saved. Deploy will trigger shortly.');
+            setTimeout(() => {
+              btn.textContent = 'Save Settings';
+              btn.style.background = '';
+              btn.disabled = false;
+            }, 2000);
           } catch (err) {
             showToast('Save failed: ' + err.message, 'error');
             btn.textContent = 'Save Settings';
