@@ -40,7 +40,11 @@ export default function cmsAdmin(options = {}) {
         // Auto-detect repo and branch from git remote
         const gitInfo = detectGitInfo(siteRoot, logger);
         const repo = options.repo || gitInfo.repo || '';
-        const branch = options.branch || gitInfo.branch || 'main';
+
+        // Branch logic: production env → 'production' branch, otherwise auto-detect
+        const siteEnv = process.env.PUBLIC_SITE_ENV ?? 'template';
+        const defaultBranch = siteEnv === 'production' ? 'production' : gitInfo.branch || 'main';
+        const branch = options.branch || defaultBranch;
 
         // Write manifest for the admin page to read at runtime
         const manifest = {
