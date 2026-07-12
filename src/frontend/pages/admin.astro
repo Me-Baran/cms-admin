@@ -65,7 +65,7 @@ import '../styles/admin.css';
   <script>
     import { getSession, getUser, onAuthStateChange } from '../lib/supabase.js';
     import { isAuthError } from '../lib/github.js';
-    import { listCollection, getContent } from '../lib/content.js';
+    import { listCollection, getContent, loadCollection } from '../lib/content.js';
     import { COLLECTIONS, COLLECTION_KEYS, getDefaults } from '../lib/schema.js';
     import { loadMedia, saveMedia, scanImages, scanUsage, uploadMedia, addExternalUrl, updateMetadata, deleteMedia, getImageSha } from '../lib/media.js';
 
@@ -77,6 +77,62 @@ import '../styles/admin.css';
 
     let currentUser = null;
     let githubToken = null;
+
+    // Reference/select field config.
+    // list fields that reference another collection's slugs (dropdown of existing items).
+    const REFERENCE_TARGETS = {
+      relatedServices: 'services',
+      relatedBlogs: 'blog',
+      relatedPosts: 'blog',
+      relatedArticles: 'blog',
+      relatedDentists: 'dentists',
+      relatedUsers: 'users',
+      relatedTestimonials: 'testimonials',
+    };
+    // string/tags fields that should suggest distinct existing values from the collection.
+    const SUGGEST_FIELDS = ['author', 'category', 'specialty'];
+
+    // Fill a <datalist> with option values.
+    function fillDatalist(fieldName, values) {
+      const dl = document.getElementById(`dl-${fieldName}`);
+      if (!dl) return;
+      const uniq = Array.from(new Set(values.filter(Boolean).map(String))).sort();
+      dl.innerHTML = uniq.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+    }
+
+    // Populate reference/suggest datalists in the background (non-blocking).
+    async function populateFieldOptions(collectionName, fields) {
+      // Slug-based reference lists — one cheap listing call per target collection.
+      const targets = new Set();
+      for (const f of fields) {
+        if (f.type === 'list' && REFERENCE_TARGETS[f.name] && COLLECTIONS[REFERENCE_TARGETS[f.name]]) {
+          targets.add(f.name);
+        }
+      }
+      for (const name of targets) {
+        try {
+          const items = await listCollection(githubToken, REFERENCE_TARGETS[name]);
+          fillDatalist(name, items.map(i => i.slug));
+        } catch {}
+      }
+
+      // Distinct-value suggestions (tags + known string fields) — needs a full scan.
+      const scanFields = fields.filter(f => f.type === 'tags' || SUGGEST_FIELDS.includes(f.name));
+      if (scanFields.length) {
+        try {
+          const loaded = await loadCollection(githubToken, collectionName);
+          for (const f of scanFields) {
+            const vals = new Set();
+            for (const it of loaded) {
+              const v = it.data?.[f.name];
+              if (Array.isArray(v)) v.forEach(x => vals.add(String(x)));
+              else if (v !== undefined && v !== null && v !== '') vals.add(String(v));
+            }
+            fillDatalist(f.name, Array.from(vals));
+          }
+        } catch {}
+      }
+    }
 
     // Parse URL params
     function getParams() {
@@ -322,8 +378,11 @@ import '../styles/admin.css';
         const req = field.required ? 'required' : '';
 
         let input = '';
+        const suggest = SUGGEST_FIELDS.includes(field.name);
         if (field.type === 'string') {
-          input = `<input type="text" name="${field.name}" value="${escapeHtml(String(value))}" class="field-input" ${req} />`;
+          const listAttr = suggest ? `list="dl-${field.name}"` : '';
+          const dl = suggest ? `<datalist id="dl-${field.name}"></datalist>` : '';
+          input = `<input type="text" name="${field.name}" value="${escapeHtml(String(value))}" class="field-input" ${listAttr} ${req} />${dl}`;
         } else if (field.type === 'text') {
           input = `<textarea name="${field.name}" class="field-textarea" rows="3" ${req}>${escapeHtml(String(value))}</textarea>`;
         } else if (field.type === 'number') {
@@ -335,19 +394,22 @@ import '../styles/admin.css';
           input = `<label class="field-checkbox"><input type="checkbox" name="${field.name}" ${value ? 'checked' : ''} /><span>${field.label}</span></label>`;
         } else if (field.type === 'tags') {
           const tagStr = Array.isArray(value) ? value.join(', ') : value;
-          input = `<input type="text" name="${field.name}" value="${escapeHtml(tagStr)}" class="field-input" placeholder="tag1, tag2, tag3" />`;
+          input = `<input type="text" name="${field.name}" value="${escapeHtml(tagStr)}" class="field-input" list="dl-${field.name}" placeholder="tag1, tag2, tag3" /><datalist id="dl-${field.name}"></datalist>`;
         } else if (field.type === 'list') {
+          const isRef = !!REFERENCE_TARGETS[field.name];
+          const listAttr = isRef ? `list="dl-${field.name}"` : '';
           const items = Array.isArray(value) ? value : [];
           const listItems = items.map(v => `
             <div class="list-item">
-              <input type="text" name="${field.name}[]" value="${escapeHtml(String(v))}" class="field-input" />
+              <input type="text" name="${field.name}[]" value="${escapeHtml(String(v))}" class="field-input" ${listAttr} />
               <button type="button" class="btn-remove" title="Remove">&times;</button>
             </div>
           `).join('');
           input = `
-            <div class="field-list" data-field="${field.name}">
+            <div class="field-list" data-field="${field.name}"${isRef ? ' data-reference="true"' : ''}>
               <div class="list-items">${listItems}</div>
               <button type="button" class="btn-add-item">+ Add</button>
+              ${isRef ? `<datalist id="dl-${field.name}"></datalist>` : ''}
             </div>
           `;
         } else if (field.type === 'image') {
@@ -461,6 +523,9 @@ import '../styles/admin.css';
 
       // Attach handlers
       attachEditorHandlers(collectionName, isNew);
+
+      // Populate reference/suggestion dropdowns in the background.
+      populateFieldOptions(collectionName, fields);
     }
 
     function escapeHtml(str) {
@@ -522,10 +587,11 @@ import '../styles/admin.css';
           } else {
             const itemsDiv = container.querySelector('.list-items');
             const fieldName = container.dataset.field;
+            const listAttr = container.dataset.reference === 'true' ? `list="dl-${fieldName}"` : '';
             const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML = `
-              <input type="text" name="${fieldName}[]" class="field-input" />
+              <input type="text" name="${fieldName}[]" class="field-input" ${listAttr} />
               <button type="button" class="btn-remove">&times;</button>
             `;
             itemsDiv.appendChild(div);
