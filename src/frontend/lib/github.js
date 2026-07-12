@@ -10,6 +10,40 @@
 const GITHUB_API = 'https://api.github.com';
 
 /**
+ * Encode a JS string to base64 as UTF-8 (handles non-Latin1 chars like
+ * Turkish/Persian). Plain btoa() throws on characters > U+00FF.
+ */
+export function encodeBase64Utf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  return bytesToBase64(bytes);
+}
+
+/**
+ * Decode base64 (as returned by the GitHub API) back to a UTF-8 string.
+ */
+export function decodeBase64Utf8(b64) {
+  const clean = b64.replace(/\s/g, '');
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Convert a byte array to base64 without blowing the call stack on large
+ * files (spreading a big Uint8Array into String.fromCharCode overflows).
+ */
+export function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
+}
+
+/**
  * Detect a GitHub authentication failure (expired/revoked OAuth token).
  * GitHub returns 401 "Bad credentials" when the provider token has expired
  * but the Supabase session is still valid.
@@ -68,7 +102,7 @@ export async function readFile(token, path, ref) {
   }
 
   const data = await resp.json();
-  const content = atob(data.content);
+  const content = decodeBase64Utf8(data.content);
   return { content, sha: data.sha };
 }
 
@@ -103,12 +137,20 @@ export async function listFiles(token, dirPath, ref) {
  * For updates, pass the current sha.
  */
 export async function writeFile(token, path, content, message, sha = null) {
+  return writeFileBase64(token, path, encodeBase64Utf8(content), message, sha);
+}
+
+/**
+ * Create or update a file from already-base64-encoded content.
+ * Use for binary files (images) — pass base64 built via bytesToBase64().
+ */
+export async function writeFileBase64(token, path, base64Content, message, sha = null) {
   const repo = getSiteRepo();
   const url = `${GITHUB_API}/repos/${repo}/contents/${path}`;
 
   const body = {
     message,
-    content: btoa(content),
+    content: base64Content,
     branch: getDefaultBranch(),
   };
   if (sha) body.sha = sha;
@@ -220,14 +262,14 @@ export async function uploadImage(token, file, collectionName) {
   const filename = `${safeName}-${uniqueId}.${ext}`;
   const path = `public/images/uploads/${filename}`;
 
-  // Read file as base64
+  // Read file as base64 (chunked — avoids call-stack overflow on large files)
   const buffer = await file.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const base64 = bytesToBase64(new Uint8Array(buffer));
 
-  const result = await writeFile(
+  const result = await writeFileBase64(
     token,
     path,
-    atob(base64),
+    base64,
     `Upload image: ${filename}`
   );
 

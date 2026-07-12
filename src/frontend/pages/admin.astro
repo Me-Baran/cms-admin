@@ -464,7 +464,31 @@ import '../styles/admin.css';
     }
 
     function escapeHtml(str) {
-      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Set an image field's path input + preview, and optionally prefill alt/SEO.
+    function setImageField(fieldName, url, meta) {
+      const urlInput = document.querySelector(`[name="${fieldName}"]`);
+      if (urlInput) urlInput.value = url;
+      const wrap = urlInput?.closest('.field-image');
+      if (wrap) {
+        let preview = wrap.querySelector('.image-preview');
+        if (!preview) {
+          preview = document.createElement('div');
+          preview.className = 'image-preview';
+          wrap.prepend(preview);
+        }
+        preview.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(meta?.alt || fieldName)}" />`;
+      }
+      if (meta) {
+        const altInput = document.querySelector(`[data-img-alt="${fieldName}"]`);
+        if (altInput && meta.alt) altInput.value = meta.alt;
+        const ogTitleInput = document.querySelector(`[data-img-og-title="${fieldName}"]`);
+        if (ogTitleInput && meta.seo?.ogTitle) ogTitleInput.value = meta.seo.ogTitle;
+        const ogDescInput = document.querySelector(`[data-img-og-desc="${fieldName}"]`);
+        if (ogDescInput && meta.seo?.ogDescription) ogDescInput.value = meta.seo.ogDescription;
+      }
     }
 
     function attachEditorHandlers(collectionName, isNew) {
@@ -536,32 +560,24 @@ import '../styles/admin.css';
         });
       });
 
-      // Image field: inline upload
+      // Image field: inline upload → uploads to repo AND registers in media library
       document.querySelectorAll('[data-upload-field]').forEach(input => {
         input.addEventListener('change', async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
           const fieldName = input.dataset.uploadField;
+          const label = input.closest('.btn-upload-inline');
+          const labelText = label ? label.childNodes[0].textContent : '';
+          if (label) label.childNodes[0].textContent = 'Uploading… ';
           try {
-            const { uploadImage } = await import('../lib/github.js');
-            const result = await uploadImage(githubToken, file);
-            const urlInput = document.querySelector(`[name="${fieldName}"]`);
-            if (urlInput) urlInput.value = result.url;
-            const preview = urlInput?.closest('.field-image')?.querySelector('.image-preview');
-            if (preview) {
-              preview.innerHTML = `<img src="${result.url}" alt="${fieldName}" />`;
-            } else {
-              const fieldImage = urlInput?.closest('.field-image');
-              if (fieldImage) {
-                const div = document.createElement('div');
-                div.className = 'image-preview';
-                div.innerHTML = `<img src="${result.url}" alt="${fieldName}" />`;
-                fieldImage.prepend(div);
-              }
-            }
+            const result = await uploadMedia(githubToken, file, currentUser);
+            setImageField(fieldName, result.url);
             showToast('Image uploaded.');
           } catch (err) {
             showToast('Upload failed: ' + err.message, 'error');
+          } finally {
+            if (label) label.childNodes[0].textContent = labelText;
+            input.value = '';
           }
         });
       });
@@ -1260,108 +1276,95 @@ import '../styles/admin.css';
 
     // Media Picker — opens media library in a modal for content editor image fields
     async function openMediaPicker(fieldName) {
-      let pickerMediaData;
-      try {
-        pickerMediaData = await loadMedia(githubToken);
-      } catch {
-        pickerMediaData = { images: {}, sha: null };
-      }
-
-      const entries = Object.entries(pickerMediaData.images);
-
       const modal = document.createElement('div');
       modal.className = 'media-dialog-overlay';
       modal.innerHTML = `
-        <div class="media-dialog" style="max-width:700px;max-height:80vh;overflow-y:auto;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div class="media-dialog media-picker-dialog">
+          <div class="media-picker-head">
             <h3 style="margin:0;">Select Image</h3>
-            <button class="detail-close" id="picker-close">&times;</button>
+            <button class="detail-close" id="picker-close" aria-label="Close">&times;</button>
           </div>
           <div class="media-grid" id="picker-grid">
-            ${entries.length === 0 ? '<div class="empty-state"><p>No images in media library.</p></div>' :
-              entries.map(([path, meta]) => {
-                const isExternal = path.startsWith('http');
-                const thumbUrl = isExternal ? path : `/${path}`;
-                return `
-                  <div class="media-card" data-picker-path="${escapeHtml(path)}">
-                    <div class="media-thumb">
-                      <img src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(meta.alt || '')}" loading="lazy" />
-                    </div>
-                    <div class="media-card-name">${escapeHtml(meta.title || path.split('/').pop())}</div>
-                  </div>
-                `;
-              }).join('')
-            }
+            <div class="loading-state" style="grid-column:1/-1;"><div class="spinner"></div><p>Loading images…</p></div>
           </div>
-          <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #e9ecef;">
-            <p style="font-size:0.8rem;color:#888;margin:0;">Or enter a URL manually:</p>
-            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-              <input type="url" class="field-input" id="picker-manual-url" placeholder="https://..." style="flex:1;" />
-              <button class="btn btn-secondary" id="picker-use-url">Use URL</button>
-            </div>
+          <div class="media-picker-foot">
+            <label class="btn btn-secondary" style="cursor:pointer;">
+              Upload new
+              <input type="file" accept="image/*" hidden id="picker-upload" />
+            </label>
+            <input type="url" class="field-input" id="picker-manual-url" placeholder="Or paste image URL…" style="flex:1;" />
+            <button class="btn btn-secondary" id="picker-use-url">Use URL</button>
           </div>
         </div>
       `;
       document.body.appendChild(modal);
 
-      // Close
-      document.getElementById('picker-close')?.addEventListener('click', () => modal.remove());
-      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+      const close = () => modal.remove();
+      document.getElementById('picker-close')?.addEventListener('click', close);
+      modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-      // Pick from grid
-      modal.querySelectorAll('[data-picker-path]').forEach(card => {
-        card.addEventListener('click', () => {
-          const path = card.dataset.pickerPath;
-          const isExternal = path.startsWith('http');
-          const url = isExternal ? path : `/${path}`;
-          const meta = pickerMediaData.images[path];
+      // Load repo images + metadata in parallel, then merge.
+      let mediaImages = {};
+      let scanned = [];
+      try {
+        const [media, imgs] = await Promise.all([
+          loadMedia(githubToken).catch(() => ({ images: {} })),
+          scanImages(githubToken).catch(() => []),
+        ]);
+        mediaImages = media.images || {};
+        scanned = imgs || [];
+      } catch {}
 
-          const urlInput = document.querySelector(`[name="${fieldName}"]`);
-          if (urlInput) urlInput.value = url;
+      // Merge: every scanned repo image + any external URLs recorded in metadata.
+      const byPath = new Map();
+      for (const img of scanned) byPath.set(img.path, { path: img.path, url: img.url, meta: mediaImages[img.path] || {} });
+      for (const [path, meta] of Object.entries(mediaImages)) {
+        if (path.startsWith('http')) byPath.set(path, { path, url: path, meta });
+        else if (!byPath.has(path)) byPath.set(path, { path, url: `/${path}`, meta });
+      }
+      const items = Array.from(byPath.values());
 
-          // Prefill alt + SEO from the selected image's media entry.
-          const altInput = document.querySelector(`[data-img-alt="${fieldName}"]`);
-          if (altInput && meta?.alt) altInput.value = meta.alt;
-          const ogTitleInput = document.querySelector(`[data-img-og-title="${fieldName}"]`);
-          if (ogTitleInput && meta?.seo?.ogTitle) ogTitleInput.value = meta.seo.ogTitle;
-          const ogDescInput = document.querySelector(`[data-img-og-desc="${fieldName}"]`);
-          if (ogDescInput && meta?.seo?.ogDescription) ogDescInput.value = meta.seo.ogDescription;
+      const pick = (url, meta) => { setImageField(fieldName, url, meta); close(); };
 
-          // Update preview
-          const fieldImage = urlInput?.closest('.field-image');
-          let preview = fieldImage?.querySelector('.image-preview');
-          if (preview) {
-            preview.innerHTML = `<img src="${url}" alt="${meta?.alt || fieldName}" />`;
-          } else if (fieldImage) {
-            const div = document.createElement('div');
-            div.className = 'image-preview';
-            div.innerHTML = `<img src="${url}" alt="${meta?.alt || fieldName}" />`;
-            fieldImage.prepend(div);
-          }
-
-          modal.remove();
+      const grid = modal.querySelector('#picker-grid');
+      if (items.length === 0) {
+        grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><p>No images found. Upload one or paste a URL below.</p></div>';
+      } else {
+        grid.innerHTML = items.map((it, i) => `
+          <div class="media-card" data-picker-idx="${i}">
+            <div class="media-thumb">
+              <img src="${escapeHtml(it.url)}" alt="${escapeHtml(it.meta.alt || '')}" loading="lazy" />
+            </div>
+            <div class="media-card-name">${escapeHtml(it.meta.title || it.path.split('/').pop())}</div>
+          </div>
+        `).join('');
+        grid.querySelectorAll('[data-picker-idx]').forEach(card => {
+          card.addEventListener('click', () => {
+            const it = items[Number(card.dataset.pickerIdx)];
+            pick(it.url, it.meta);
+          });
         });
-      });
+      }
 
       // Manual URL
       document.getElementById('picker-use-url')?.addEventListener('click', () => {
         const url = document.getElementById('picker-manual-url')?.value.trim();
         if (!url) return;
-        const urlInput = document.querySelector(`[name="${fieldName}"]`);
-        if (urlInput) urlInput.value = url;
+        pick(url, mediaImages[url] || null);
+      });
 
-        const fieldImage = urlInput?.closest('.field-image');
-        let preview = fieldImage?.querySelector('.image-preview');
-        if (preview) {
-          preview.innerHTML = `<img src="${url}" alt="${fieldName}" />`;
-        } else if (fieldImage) {
-          const div = document.createElement('div');
-          div.className = 'image-preview';
-          div.innerHTML = `<img src="${url}" alt="${fieldName}" />`;
-          fieldImage.prepend(div);
+      // Upload from within the picker
+      document.getElementById('picker-upload')?.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        grid.innerHTML = '<div class="loading-state" style="grid-column:1/-1;"><div class="spinner"></div><p>Uploading…</p></div>';
+        try {
+          const result = await uploadMedia(githubToken, file, currentUser);
+          pick(result.url, result.entry);
+        } catch (err) {
+          showToast('Upload failed: ' + err.message, 'error');
+          close();
         }
-
-        modal.remove();
       });
     }
 
@@ -1987,6 +1990,33 @@ import '../styles/admin.css';
     }
 
     .media-dialog h3 { margin: 0 0 1rem; }
+
+    .media-picker-dialog {
+      max-width: 760px;
+      max-height: 82vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .media-picker-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .media-picker-dialog .media-grid {
+      overflow-y: auto;
+      flex: 1;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      align-content: start;
+    }
+    .media-picker-foot {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e9ecef;
+    }
 
     .media-dialog-preview {
       min-height: 40px;

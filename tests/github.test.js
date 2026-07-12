@@ -1,5 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { headers, getSiteRepo } from '../src/frontend/lib/github.js';
+import { headers, getSiteRepo, encodeBase64Utf8, decodeBase64Utf8, bytesToBase64 } from '../src/frontend/lib/github.js';
+
+describe('base64 encoding', () => {
+  it('round-trips ASCII', () => {
+    expect(decodeBase64Utf8(encodeBase64Utf8('Hello World'))).toBe('Hello World');
+  });
+
+  it('round-trips Turkish and Persian (non-Latin1) text', () => {
+    const s = 'Estetik Diş Hekimliği — دندانپزشکی زیبایی';
+    expect(decodeBase64Utf8(encodeBase64Utf8(s))).toBe(s);
+  });
+
+  it('encodeBase64Utf8 does not throw on non-Latin1 (regression for btoa)', () => {
+    expect(() => encodeBase64Utf8('Diş')).not.toThrow();
+  });
+
+  it('decodes GitHub-style base64 with embedded newlines', () => {
+    const raw = encodeBase64Utf8('line content');
+    const withNewlines = raw.replace(/(.{4})/g, '$1\n');
+    expect(decodeBase64Utf8(withNewlines)).toBe('line content');
+  });
+
+  it('bytesToBase64 handles large arrays without stack overflow', () => {
+    const big = new Uint8Array(200000).fill(65);
+    const b64 = bytesToBase64(big);
+    expect(atob(b64).length).toBe(200000);
+  });
+});
 
 // Mock import.meta.env
 const originalEnv = { ...import.meta.env };

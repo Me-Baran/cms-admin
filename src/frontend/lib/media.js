@@ -5,7 +5,7 @@
  * Images are uploaded to public/images/uploads/ via GitHub API.
  */
 
-import { readFile, writeFile, listDirectory, deleteFile } from './github.js';
+import { readFile, writeFile, writeFileBase64, bytesToBase64, listDirectory, deleteFile } from './github.js';
 
 const MEDIA_PATH = 'public/images/_media.json';
 const UPLOADS_DIR = 'public/images/uploads';
@@ -117,13 +117,12 @@ export async function uploadMedia(token, file, currentUser) {
   const urlPath = `images/uploads/${filename}`;
 
   const buffer = await file.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-  const binaryContent = atob(base64);
+  const base64 = bytesToBase64(new Uint8Array(buffer));
 
-  const result = await writeFile(
+  const result = await writeFileBase64(
     token,
     fullPath,
-    binaryContent,
+    base64,
     `Upload image: ${filename}`
   );
 
