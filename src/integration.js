@@ -41,10 +41,8 @@ export default function cmsAdmin(options = {}) {
         const gitInfo = detectGitInfo(siteRoot, logger);
         const repo = options.repo || gitInfo.repo || '';
 
-        // Branch logic: production env → 'production' branch, otherwise auto-detect
-        const siteEnv = process.env.PUBLIC_SITE_ENV ?? 'template';
-        const defaultBranch = siteEnv === 'production' ? 'production' : gitInfo.branch || 'main';
-        const branch = options.branch || defaultBranch;
+        // Branch: explicit option, otherwise the repo's current branch.
+        const branch = options.branch || gitInfo.branch || 'main';
 
         // Write manifest for the admin page to read at runtime
         const manifest = {
