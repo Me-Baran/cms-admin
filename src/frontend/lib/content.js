@@ -199,7 +199,8 @@ export async function listCollection(token, collectionName) {
     if (!['md', 'mdx'].includes(ext)) continue;
 
     const slug = file.name.replace(/\.(md|mdx)$/, '');
-    items.push({ slug, path: file.path, sha: file.sha, name: file.name });
+    const extWithDot = '.' + ext;
+    items.push({ slug, path: file.path, sha: file.sha, name: file.name, ext: extWithDot });
   }
 
   return items;
@@ -213,14 +214,26 @@ export async function getContent(token, collectionName, slug) {
   const col = COLLECTIONS[collectionName];
   if (!col) throw new Error(`Unknown collection: ${collectionName}`);
 
-  const ext = col.extension || '.md';
-  const path = `${col.folder}/${slug}${ext}`;
-  const result = await readFile(token, path);
-
+  const result = await readContentAnyExt(token, col, slug);
   if (!result) return null;
 
   const { data, body } = parseFrontmatter(result.content);
-  return { slug, data, body, sha: result.sha, path };
+  return { slug, data, body, sha: result.sha, path: result.path, ext: result.ext };
+}
+
+/**
+ * Read a content file, trying the known extension first then falling back
+ * to the other markdown extension. The manifest may not declare extension,
+ * and GitHub returns 404 for a wrong extension (so readFile returns null).
+ */
+async function readContentAnyExt(token, col, slug) {
+  const extensions = col.extension ? [col.extension] : ['.mdx', '.md'];
+  for (const ext of extensions) {
+    const path = `${col.folder}/${slug}${ext}`;
+    const result = await readFile(token, path);
+    if (result) return { ...result, path, ext };
+  }
+  return null;
 }
 
 /**
@@ -241,18 +254,20 @@ export async function createContent(token, collectionName, slug, data, body) {
     `Create ${collectionName}: ${data.title || data.name || slug}`
   );
 
-  return { slug, path, sha: result.content.sha };
+  return { slug, path, sha: result.content.sha, ext };
 }
 
 /**
  * Update an existing content item.
  */
-export async function updateContent(token, collectionName, slug, data, body, sha) {
+export async function updateContent(token, collectionName, slug, data, body, sha, path) {
   const col = COLLECTIONS[collectionName];
   if (!col) throw new Error(`Unknown collection: ${collectionName}`);
 
-  const ext = col.extension || '.md';
-  const path = `${col.folder}/${slug}${ext}`;
+  if (!path) {
+    const ext = col.extension || '.md';
+    path = `${col.folder}/${slug}${ext}`;
+  }
   const content = serializeFrontmatter(data, body);
 
   const result = await writeFile(
@@ -269,12 +284,14 @@ export async function updateContent(token, collectionName, slug, data, body, sha
 /**
  * Delete a content item.
  */
-export async function deleteContent(token, collectionName, slug, sha) {
+export async function deleteContent(token, collectionName, slug, sha, path) {
   const col = COLLECTIONS[collectionName];
   if (!col) throw new Error(`Unknown collection: ${collectionName}`);
 
-  const ext = col.extension || '.md';
-  const path = `${col.folder}/${slug}${ext}`;
+  if (!path) {
+    const ext = col.extension || '.md';
+    path = `${col.folder}/${slug}${ext}`;
+  }
 
   await deleteFile(
     token,

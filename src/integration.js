@@ -104,9 +104,14 @@ function discoverCollections(siteRoot, logger) {
       // Infer fields from the first file's frontmatter
       const fields = inferFields(folderPath, files);
 
+      // Detect the file extension used by this collection (.mdx preferred)
+      const usesMdx = files.some(f => f.endsWith('.mdx'));
+      const extension = usesMdx ? '.mdx' : '.md';
+
       collections[name] = {
         label: name.charAt(0).toUpperCase() + name.slice(1).replace(/-/g, ' '),
         folder: `src/content/${name}`,
+        extension,
         icon: getCollectionIcon(name),
         fields,
       };

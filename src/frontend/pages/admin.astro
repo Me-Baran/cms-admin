@@ -255,7 +255,7 @@ import '../styles/admin.css';
               const { deleteContent } = await import('../lib/content.js');
               const item = await getContent(githubToken, col, slug);
               if (!item) { alert('Not found'); return; }
-              await deleteContent(githubToken, col, slug, item.sha);
+              await deleteContent(githubToken, col, slug, item.sha, item.path);
               renderCollectionList(col);
             } catch (e) {
               alert('Delete failed: ' + e.message);
@@ -593,10 +593,10 @@ import '../styles/admin.css';
 
         try {
           const { createContent, updateContent } = await import('../lib/content.js');
-          if (isNewItem) {
+           if (isNewItem) {
             await createContent(githubToken, col, slug, data, body);
           } else {
-            await updateContent(githubToken, col, slug, data, body, sha);
+            await updateContent(githubToken, col, slug, data, body, sha, item?.path);
           }
           btn.textContent = 'Saved ✓';
           btn.style.background = '#27ae60';
@@ -618,8 +618,8 @@ import '../styles/admin.css';
         if (!confirm(`Delete "${slug}"?`)) return;
         try {
           const { deleteContent } = await import('../lib/content.js');
-          const sha = document.querySelector('[name="sha"]').value;
-          await deleteContent(githubToken, col, slug, sha);
+           const sha = document.querySelector('[name="sha"]').value;
+           await deleteContent(githubToken, col, slug, sha, item?.path);
           window.location.href = `/admin?collection=${col}`;
         } catch (err) {
           alert('Delete failed: ' + err.message);
