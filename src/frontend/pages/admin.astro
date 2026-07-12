@@ -302,6 +302,20 @@ import '../styles/admin.css';
       const itemSlug = item?.slug || '';
       const sha = item?.sha || '';
 
+      // Load media metadata so image fields can show/edit alt + SEO from the media library.
+      let mediaImages = {};
+      const hasImageField = fields.some(f => f.type === 'image');
+      if (hasImageField) {
+        try {
+          const md = await loadMedia(githubToken);
+          mediaImages = md.images || {};
+        } catch {
+          mediaImages = {};
+        }
+      }
+      // _media.json keys are relative to public/ (no leading slash); external images use the full URL.
+      const mediaKey = (p) => (!p ? '' : (p.startsWith('http') ? p : p.replace(/^\//, '')));
+
       const fieldsHtml = fields.map(field => {
         if (field.name === 'body') return '';
         const value = data[field.name] ?? field.default ?? '';
@@ -337,10 +351,13 @@ import '../styles/admin.css';
             </div>
           `;
         } else if (field.type === 'image') {
-          const preview = value ? `<div class="image-preview"><img src="${value}" alt="${field.label}" /></div>` : '';
-          const altValue = data[`${field.name}Alt`] || data[`${field.name}_alt`] || '';
+          const meta = mediaImages[mediaKey(String(value))] || {};
+          const altValue = meta.alt || '';
+          const ogTitle = meta.seo?.ogTitle || '';
+          const ogDesc = meta.seo?.ogDescription || '';
+          const preview = value ? `<div class="image-preview"><img src="${escapeHtml(String(value))}" alt="${escapeHtml(altValue || field.label)}" /></div>` : '';
           input = `
-            <div class="field-image">
+            <div class="field-image" data-image-field-wrap="${field.name}">
               ${preview}
               <div class="image-field-controls">
                 <input type="text" name="${field.name}" value="${escapeHtml(String(value))}" class="field-input" placeholder="/images/..." />
@@ -351,8 +368,13 @@ import '../styles/admin.css';
                 </label>
               </div>
               <div class="image-alt-field">
-                <input type="text" name="${field.name}Alt" value="${escapeHtml(altValue)}" class="field-input" placeholder="Alt text" />
+                <input type="text" class="field-input" data-img-alt="${field.name}" value="${escapeHtml(altValue)}" placeholder="Alt text (saved to media library)" />
               </div>
+              <details class="image-seo-field">
+                <summary>SEO metadata</summary>
+                <input type="text" class="field-input" data-img-og-title="${field.name}" value="${escapeHtml(ogTitle)}" placeholder="Open Graph title" style="margin-top:0.5rem;" />
+                <input type="text" class="field-input" data-img-og-desc="${field.name}" value="${escapeHtml(ogDesc)}" placeholder="Open Graph description" style="margin-top:0.5rem;" />
+              </details>
             </div>
           `;
         } else if (field.type === 'repeatable') {
@@ -598,6 +620,26 @@ import '../styles/admin.css';
           } else {
             await updateContent(githubToken, col, slug, data, body, sha, item?.path);
           }
+
+          // Persist image alt/SEO to the media library (_media.json), keyed by image path.
+          const toMediaKey = (p) => (!p ? '' : (p.startsWith('http') ? p : p.replace(/^\//, '')));
+          for (const field of schema.fields) {
+            if (field.type !== 'image') continue;
+            const path = (fd.get(field.name) || '').trim();
+            if (!path) continue;
+            const wrap = form.querySelector(`[data-image-field-wrap="${field.name}"]`);
+            if (!wrap) continue;
+            const alt = wrap.querySelector(`[data-img-alt="${field.name}"]`)?.value ?? '';
+            const ogTitle = wrap.querySelector(`[data-img-og-title="${field.name}"]`)?.value ?? '';
+            const ogDescription = wrap.querySelector(`[data-img-og-desc="${field.name}"]`)?.value ?? '';
+            if (!alt && !ogTitle && !ogDescription) continue;
+            try {
+              await updateMetadata(githubToken, toMediaKey(path), { alt, seo: { ogTitle, ogDescription } });
+            } catch (metaErr) {
+              showToast('Image metadata not saved: ' + metaErr.message, 'error');
+            }
+          }
+
           btn.textContent = 'Saved ✓';
           btn.style.background = '#27ae60';
           showToast('Content saved. Deploy will trigger shortly.');
@@ -1277,11 +1319,13 @@ import '../styles/admin.css';
           const urlInput = document.querySelector(`[name="${fieldName}"]`);
           if (urlInput) urlInput.value = url;
 
-          // Update alt text if empty
-          const altInput = document.querySelector(`[name="${fieldName}Alt"]`);
-          if (altInput && !altInput.value && meta?.alt) {
-            altInput.value = meta.alt;
-          }
+          // Prefill alt + SEO from the selected image's media entry.
+          const altInput = document.querySelector(`[data-img-alt="${fieldName}"]`);
+          if (altInput && meta?.alt) altInput.value = meta.alt;
+          const ogTitleInput = document.querySelector(`[data-img-og-title="${fieldName}"]`);
+          if (ogTitleInput && meta?.seo?.ogTitle) ogTitleInput.value = meta.seo.ogTitle;
+          const ogDescInput = document.querySelector(`[data-img-og-desc="${fieldName}"]`);
+          if (ogDescInput && meta?.seo?.ogDescription) ogDescInput.value = meta.seo.ogDescription;
 
           // Update preview
           const fieldImage = urlInput?.closest('.field-image');
@@ -1993,6 +2037,15 @@ import '../styles/admin.css';
     .btn-upload-inline:hover { background: #e9ecef; }
 
     .image-alt-field { margin-top: 0.5rem; }
+
+    .image-seo-field { margin-top: 0.5rem; }
+    .image-seo-field summary {
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #666;
+      user-select: none;
+    }
+    .image-seo-field summary:hover { color: #333; }
   </style>
 </body>
 </html>
