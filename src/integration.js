@@ -170,8 +170,8 @@ function inferType(key, value) {
   if (['draft', 'featured'].includes(key)) return 'boolean';
   if (['order', 'rating'].includes(key)) return 'number';
   if (['pubDate', 'updatedDate', 'date'].includes(key)) return 'date';
-  if (['tags', 'categories'].includes(key)) return 'tags';
-  if (['relatedServices', 'relatedBlogs', 'education', 'treatments'].includes(key)) return 'list';
+  if (['tags', 'categories', 'roles'].includes(key)) return 'tags';
+  if (['relatedServices', 'relatedBlogs', 'relatedUsers', 'relatedDentists', 'education', 'treatments'].includes(key)) return 'list';
   if (['featuredImage', 'photo', 'image'].includes(key)) return 'image';
   if (key === 'description' || key === 'biography' || key === 'text') return 'text';
   return 'string';
@@ -188,7 +188,7 @@ function getCollectionIcon(name) {
   const icons = {
     blog: ' ', posts: ' ', articles: ' ',
     services: ' ', dentists: ' ', doctors: ' ',
-    faq: ' ', questions: ' ', testimonials: ' ',
+    users: ' ', faq: ' ', questions: ' ', testimonials: ' ',
     projects: ' ', portfolio: ' ', products: ' ',
     pages: ' ', authors: ' ', team: ' ',
   };

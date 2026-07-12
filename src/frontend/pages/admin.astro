@@ -47,6 +47,14 @@ import '../styles/admin.css';
         </div>
       </div>
 
+      <div id="not-authorized" style="display:none;">
+        <div class="welcome-card">
+          <h1>Access denied</h1>
+          <p id="not-authorized-msg">Your account does not have admin access to this site.</p>
+          <button id="not-authorized-logout" class="btn btn-primary">Sign out</button>
+        </div>
+      </div>
+
       <div id="main-content" style="display:none;">
         <!-- Dynamic content rendered here by JS -->
       </div>
@@ -72,6 +80,7 @@ import '../styles/admin.css';
     const $ = (sel) => document.querySelector(sel);
     const $loading = $('#loading');
     const $loginRequired = $('#login-required');
+    const $notAuthorized = $('#not-authorized');
     const $mainContent = $('#main-content');
     const $authSlot = $('#auth-slot');
 
@@ -85,12 +94,16 @@ import '../styles/admin.css';
       relatedBlogs: 'blog',
       relatedPosts: 'blog',
       relatedArticles: 'blog',
-      relatedDentists: 'dentists',
+      relatedDentists: 'users',
       relatedUsers: 'users',
       relatedTestimonials: 'testimonials',
     };
+    // single-value string fields that reference another collection's slugs.
+    const SINGLE_REFERENCE_TARGETS = {
+      author: 'users',
+    };
     // string/tags fields that should suggest distinct existing values from the collection.
-    const SUGGEST_FIELDS = ['author', 'category', 'specialty'];
+    const SUGGEST_FIELDS = ['category', 'specialty'];
 
     // Fill a <datalist> with option values.
     function fillDatalist(fieldName, values) {
@@ -114,6 +127,17 @@ import '../styles/admin.css';
           const items = await listCollection(githubToken, REFERENCE_TARGETS[name]);
           fillDatalist(name, items.map(i => i.slug));
         } catch {}
+      }
+
+      // Single-value string references (e.g. author -> users).
+      for (const f of fields) {
+        const target = SINGLE_REFERENCE_TARGETS[f.name];
+        if (f.type === 'string' && target && COLLECTIONS[target]) {
+          try {
+            const items = await listCollection(githubToken, target);
+            fillDatalist(f.name, items.map(i => i.slug));
+          } catch {}
+        }
       }
 
       // Distinct-value suggestions (tags + known string fields) — needs a full scan.
@@ -378,7 +402,7 @@ import '../styles/admin.css';
         const req = field.required ? 'required' : '';
 
         let input = '';
-        const suggest = SUGGEST_FIELDS.includes(field.name);
+        const suggest = SUGGEST_FIELDS.includes(field.name) || !!SINGLE_REFERENCE_TARGETS[field.name];
         if (field.type === 'string') {
           const listAttr = suggest ? `list="dl-${field.name}"` : '';
           const dl = suggest ? `<datalist id="dl-${field.name}"></datalist>` : '';
@@ -1447,6 +1471,52 @@ import '../styles/admin.css';
       }, 3000);
     }
 
+    // Access control: a signed-in GitHub user may use the admin only if the
+    // site's `users` collection contains an entry with role 'admin' whose
+    // `email` or `githubUsername` matches the signed-in account. An optional
+    // PUBLIC_ADMIN_EMAILS env allow-list acts as an escape hatch. If no admins
+    // are configured anywhere, any authenticated user is allowed (bootstrap).
+    async function isAuthorizedAdmin(user) {
+      if (!user) return false;
+      const identifiers = [user.email, user.username]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase());
+
+      const envAllow = (import.meta.env.PUBLIC_ADMIN_EMAILS || '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      let admins = [];
+      if (COLLECTIONS.users) {
+        try {
+          const entries = await loadCollection(githubToken, 'users');
+          admins = entries
+            .filter((e) => Array.isArray(e.data.roles) && e.data.roles.includes('admin'))
+            .flatMap((e) => [e.data.email, e.data.githubUsername])
+            .filter(Boolean)
+            .map((s) => String(s).toLowerCase());
+        } catch (e) {
+          console.warn('[cms-admin] Could not load users collection for access control:', e);
+        }
+      }
+
+      const allow = [...admins, ...envAllow];
+      if (allow.length === 0) return true;
+      return identifiers.some((id) => allow.includes(id));
+    }
+
+    function showNotAuthorized() {
+      $loading.style.display = 'none';
+      $mainContent.style.display = 'none';
+      $notAuthorized.style.display = 'block';
+      $('#not-authorized-logout')?.addEventListener('click', async () => {
+        const { signOut } = await import('../lib/supabase.js');
+        await signOut();
+        window.location.reload();
+      });
+    }
+
     // Initialize
     async function init() {
       try {
@@ -1464,6 +1534,11 @@ import '../styles/admin.css';
       if (!currentUser) {
         $loading.style.display = 'none';
         $loginRequired.style.display = 'block';
+        return;
+      }
+
+      if (!(await isAuthorizedAdmin(currentUser))) {
+        showNotAuthorized();
         return;
       }
 
