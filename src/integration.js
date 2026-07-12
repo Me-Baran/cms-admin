@@ -133,30 +133,37 @@ function inferFields(folderPath, files) {
     const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!match) return getDefaultFields();
 
-    const yaml = match[1];
-    const fields = [];
-    const lines = yaml.split('\n');
-
-    for (const line of lines) {
-      const m = line.match(/^(\w+):\s*(.*)$/);
-      if (!m) continue;
-      const key = m[1];
-      const val = m[2].trim();
-
-      if (key === 'body') continue;
-
-      const field = { name: key, label: capitalize(key), type: inferType(key, val) };
-      if (['title', 'name', 'question'].includes(key)) field.required = true;
-      fields.push(field);
-    }
-
-    // Always add body field
-    fields.push({ name: 'body', label: 'Body', type: 'markdown' });
-
-    return fields;
+    return inferFieldsFromYaml(match[1]);
   } catch {
     return getDefaultFields();
   }
+}
+
+/**
+ * Infer fields from a raw YAML frontmatter string.
+ * Handles both LF and CRLF line endings.
+ */
+function inferFieldsFromYaml(yaml) {
+  const fields = [];
+  const lines = yaml.split(/\r?\n/);
+
+  for (const line of lines) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    const val = m[2].trim();
+
+    if (key === 'body') continue;
+
+    const field = { name: key, label: capitalize(key), type: inferType(key, val) };
+    if (['title', 'name', 'question'].includes(key)) field.required = true;
+    fields.push(field);
+  }
+
+  // Always add body field
+  fields.push({ name: 'body', label: 'Body', type: 'markdown' });
+
+  return fields;
 }
 
 function inferType(key, value) {
@@ -240,3 +247,5 @@ function detectGitInfo(siteRoot, logger) {
     return { repo: '', branch: 'main' };
   }
 }
+
+export { inferFieldsFromYaml, inferType, capitalize };
