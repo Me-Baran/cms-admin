@@ -10,6 +10,17 @@
 const GITHUB_API = 'https://api.github.com';
 
 /**
+ * Detect a GitHub authentication failure (expired/revoked OAuth token).
+ * GitHub returns 401 "Bad credentials" when the provider token has expired
+ * but the Supabase session is still valid.
+ */
+export function isAuthError(err) {
+  if (!err) return false;
+  const msg = err.message || String(err);
+  return /401|Bad credentials|unauthorized/i.test(msg);
+}
+
+/**
  * Create headers for GitHub API requests.
  */
 function headers(token) {

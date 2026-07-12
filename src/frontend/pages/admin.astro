@@ -50,11 +50,21 @@ import '../styles/admin.css';
       <div id="main-content" style="display:none;">
         <!-- Dynamic content rendered here by JS -->
       </div>
+
+      <div id="github-reconnect" style="display:none;">
+        <div class="reconnect-card">
+          <h2>GitHub access expired</h2>
+          <p>Your GitHub login is still active, but the token used to read/write
+             content has expired. Reconnect to continue.</p>
+          <button id="reconnect-btn" class="btn btn-primary">Reconnect GitHub</button>
+        </div>
+      </div>
     </div>
   </AdminShell>
 
   <script>
     import { getSession, getUser, onAuthStateChange } from '../lib/supabase.js';
+    import { isAuthError } from '../lib/github.js';
     import { listCollection, getContent } from '../lib/content.js';
     import { COLLECTIONS, COLLECTION_KEYS, getDefaults } from '../lib/schema.js';
     import { loadMedia, saveMedia, scanImages, scanUsage, uploadMedia, addExternalUrl, updateMetadata, deleteMedia, getImageSha } from '../lib/media.js';
@@ -104,6 +114,26 @@ import '../styles/admin.css';
         });
       }
     }
+
+    const $reconnect = $('#github-reconnect');
+
+    // Re-run GitHub OAuth to fetch a fresh provider_token (token refresh).
+    async function reconnectGitHub() {
+      const { signInWithGitHub } = await import('../lib/supabase.js');
+      await signInWithGitHub();
+    }
+
+    // Show the reconnect banner when the GitHub token has expired.
+    function showGitHubError(e) {
+      if (isAuthError(e)) {
+        $mainContent.style.display = 'none';
+        $reconnect.style.display = 'block';
+        return;
+      }
+      console.error('[cms-admin] GitHub error:', e);
+    }
+
+    $('#reconnect-btn')?.addEventListener('click', reconnectGitHub);
 
     // Render the dashboard
     function renderDashboard() {
@@ -234,6 +264,7 @@ import '../styles/admin.css';
         });
 
       } catch (e) {
+        if (isAuthError(e)) { showGitHubError(e); return; }
         $mainContent.innerHTML = `
           <div class="error-state">
             <h2>Failed to load</h2>
@@ -258,10 +289,11 @@ import '../styles/admin.css';
             $mainContent.innerHTML = `<div class="error-state"><h2>Not found</h2><p>"${slug}" does not exist in ${col.label}.</p><a href="/admin?collection=${collectionName}" class="btn btn-primary">Back to list</a></div>`;
             return;
           }
-        } catch (e) {
-          $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p></div>`;
-          return;
-        }
+         } catch (e) {
+           if (isAuthError(e)) { showGitHubError(e); return; }
+           $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p></div>`;
+           return;
+         }
       }
 
       const fields = col.fields || [];
@@ -828,6 +860,7 @@ import '../styles/admin.css';
         });
 
       } catch (e) {
+        if (isAuthError(e)) { showGitHubError(e); return; }
         $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p></div>`;
       }
     }
@@ -871,6 +904,7 @@ import '../styles/admin.css';
 
         renderMediaGrid();
       } catch (e) {
+        if (isAuthError(e)) { showGitHubError(e); return; }
         console.error('[cms-admin] Media library error:', e);
         $mainContent.innerHTML = `<div class="error-state"><h2>Error</h2><p>${e.message}</p><button class="btn btn-primary" onclick="location.reload()">Retry</button></div>`;
       }
@@ -1321,6 +1355,7 @@ import '../styles/admin.css';
       }
 
       $loading.style.display = 'none';
+      $reconnect.style.display = 'none';
       $mainContent.style.display = 'block';
 
       const params = getParams();
@@ -1667,6 +1702,27 @@ import '../styles/admin.css';
     .btn-small:hover { background: #e9ecef; }
     .btn-danger { background: #fff0f0; color: #c0392b; margin-left: auto; }
     .btn-danger:hover { background: #ffe0e0; }
+
+    /* GitHub reconnect banner */
+    #github-reconnect {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 1rem;
+    }
+
+    .reconnect-card {
+      background: #fff;
+      border: 1px solid #f5c6cb;
+      border-radius: 10px;
+      padding: 2rem;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(192,57,43,0.1);
+    }
+
+    .reconnect-card h2 { color: #c0392b; margin: 0 0 0.75rem; font-size: 1.25rem; }
+    .reconnect-card p { color: #666; margin-bottom: 1.5rem; font-size: 0.9rem; line-height: 1.5; }
 
     /* Auth (sidebar) */
     .auth-user { display: flex; align-items: center; gap: 0.6rem; }
