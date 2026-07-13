@@ -18,7 +18,7 @@ import AuthButton from '../components/AuthButton.astro';
 import CollectionList from '../components/CollectionList.astro';
 import ContentEditor from '../components/ContentEditor.astro';
 import { COLLECTIONS, COLLECTION_KEYS } from '../lib/schema.js';
-import '../styles/admin.css';
+import adminCss from '../styles/admin.css?url';
 
 // We can't do server-side data fetching here because this is a client-rendered admin.
 // The page renders a shell, and JavaScript handles loading data from GitHub API.
@@ -28,6 +28,7 @@ import '../styles/admin.css';
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href={adminCss} />
   <title>Admin — CMS</title>
 </head>
 <body>
