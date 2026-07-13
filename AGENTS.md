@@ -160,7 +160,10 @@ SITE_REPO=yourname/astro-website
 - Media library (browse, upload, alt text, SEO metadata)
 
 ### Active
-- (none)
+- CSS scoping fix: admin.css loaded from public/ to bypass Astro scoping
+
+### TODO: Before release
+- Revert astro-website dependency from `file:../cms-admin` back to `github:Me-Baran/cms-admin#<commit-hash>` in package.json
 
 ### Planned
 - [ ] Visual layout editing (Phase 3)
