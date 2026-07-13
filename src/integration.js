@@ -13,7 +13,7 @@
  *   settings: { file, fields } — site settings editor config
  */
 
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, copyFileSync, mkdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -31,10 +31,22 @@ export default function cmsAdmin(options = {}) {
           entrypoint: new URL('./frontend/pages/admin.astro', import.meta.url),
         });
 
-        // Discover collections from the site's content directory
+        // Copy admin.css to public/ so it loads without Astro scoping.
+        // CSS from <link> tags with absolute paths skips Astro's processing.
         const siteRoot = typeof config.root === 'string'
           ? config.root
           : fileURLToPath(config.root);
+        const publicDir = join(siteRoot, 'public');
+        const adminCssSrc = fileURLToPath(new URL('./frontend/styles/admin.css', import.meta.url));
+        const adminCssDest = join(publicDir, 'admin.css');
+        try {
+          if (!existsSync(publicDir)) mkdirSync(publicDir, { recursive: true });
+          copyFileSync(adminCssSrc, adminCssDest);
+        } catch (e) {
+          logger.warn('Could not copy admin.css to public/: ' + e.message);
+        }
+
+        // Discover collections from the site's content directory
         const collections = options.collections || discoverCollections(siteRoot, logger);
 
         // Auto-detect repo and branch from git remote
